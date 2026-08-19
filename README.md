@@ -58,6 +58,24 @@ SkillHub 详情页：
 
 安装后重新打开 Codex 会话，使新增 Skill 被发现。
 
+### 从 ClawHub.ai 安装
+
+OpenClaw 用户可以通过原生 Skill 命令从 [ClawHub](https://clawhub.ai/) 安装：
+
+```powershell
+openclaw skills install @zzusp/distill-self-improving
+openclaw skills install @zzusp/evolve-self-improving
+openclaw skills install @zzusp/use-self-improving
+```
+
+ClawHub 详情页：
+
+- [distill-self-improving](https://clawhub.ai/zzusp/skills/distill-self-improving)
+- [evolve-self-improving](https://clawhub.ai/zzusp/skills/evolve-self-improving)
+- [use-self-improving](https://clawhub.ai/zzusp/skills/use-self-improving)
+
+ClawHub 上的发布副本遵循平台规定的 MIT-0 许可；GitHub 仓库继续使用根目录中的 MIT License。
+
 ## 使用
 
 安装后重新打开 Agent 会话，使 Skill 目录被重新发现。之后直接用自然语言提出任务即可，不必手动指定 Skill：
