@@ -14,6 +14,10 @@
 
 ## 安装
 
+可以从 GitHub/skills.sh 或 SkillHub.cn 安装。
+
+### 从 GitHub / skills.sh 安装
+
 需要 Node.js 和 npm。以下命令使用 [skills CLI](https://skills.sh/docs/cli) 从 GitHub 安装。
 
 全局安装三个 Skill，供 Codex 的所有项目使用：
@@ -35,6 +39,42 @@ npx skills@latest add zzusp/agent-self-improving --skill use-self-improving --ag
 ```powershell
 npx skills@latest add zzusp/agent-self-improving --list
 ```
+
+### 从 SkillHub.cn 安装
+
+国内网络可以使用 [SkillHub](https://skillhub.cn/) 安装。先按 [SkillHub 安装说明](https://skillhub.cn/install/skillhub.md) 安装 CLI；安装 Skill 时必须通过 `--dir` 指定 Codex 的全局 Skill 目录：
+
+```powershell
+skillhub install distill-self-improving --dir "$env:USERPROFILE\.codex\skills"
+skillhub install evolve-self-improving --dir "$env:USERPROFILE\.codex\skills"
+skillhub install use-self-improving --dir "$env:USERPROFILE\.codex\skills"
+```
+
+SkillHub 详情页：
+
+- [distill-self-improving](https://skillhub.cn/skills/user_8cedf1d1/distill-self-improving)
+- [evolve-self-improving](https://skillhub.cn/skills/user_8cedf1d1/evolve-self-improving)
+- [use-self-improving](https://skillhub.cn/skills/user_8cedf1d1/use-self-improving)
+
+安装后重新打开 Codex 会话，使新增 Skill 被发现。
+
+### 从 ClawHub.ai 安装
+
+OpenClaw 用户可以通过原生 Skill 命令从 [ClawHub](https://clawhub.ai/) 安装：
+
+```powershell
+openclaw skills install @zzusp/distill-self-improving
+openclaw skills install @zzusp/evolve-self-improving
+openclaw skills install @zzusp/use-self-improving
+```
+
+ClawHub 详情页：
+
+- [distill-self-improving](https://clawhub.ai/zzusp/skills/distill-self-improving)
+- [evolve-self-improving](https://clawhub.ai/zzusp/skills/evolve-self-improving)
+- [use-self-improving](https://clawhub.ai/zzusp/skills/use-self-improving)
+
+ClawHub 上的发布副本遵循平台规定的 MIT-0 许可；GitHub 仓库继续使用根目录中的 MIT License。
 
 ## 使用
 
