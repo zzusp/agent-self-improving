@@ -18,7 +18,7 @@ description: 在当前对话中自动发现 corrections、feature requests、kno
 
 1. **准备并捕获。** 数据根使用 `~/.agent-knowledge/`。根不存在时，只初始化本流程需要的 `knowledge/{current,archive}/`、`experience/{current,archive}/`、四个空 `INDEX.md`、最小 README 和 `maintenance.md`，不创建其他索引或状态。识别 correction、feature-request、knowledge-gap、error 或主动记忆信号，记录待评估结论、原始证据、适用范围和复核方式；这些词可作为 tags，但不新增类别字段。检查：来源应可回查且结论不是猜测；不通过则不写，必要时最多问一个自然问题。
 2. **判断资格和分类。** 稳定条目必须同时满足：有原文件、命令回读、现场或明确确认支持；跨会话仍有意义，易变值只保存权威入口和核验方法；可在相同条件下复用；scope 和不适用边界清楚；已脱敏且能明确归为事实或方法。稳定事实、定义、职责、入口和约束归 knowledge；方法、条件、失败模式和护栏归 experience。检查：五项必须全部成立；不通过则说明为什么未沉淀。
-3. **去重、冲突、复现和纠正。** 先读 knowledge/experience 两个 current INDEX，用 title、scope、tags、source 简写和特异概括缩小候选，再比较候选正文的 id、标题、scope、source 和语义；纠错追溯时定向读取 archive INDEX。INDEX 缺失或失配时停止写入，先由本流程重建并验证。等价条目不新增：若后续独立事件与既有条目的问题模式、scope 和实质结论一致，并有新的可回查 source，则在 `recurrence/<entry-id>.md` 追加一条复现证据；同一会话的重复表述、命令重试、连续错误输出、普通读取或引用不计复现。未收敛冲突可同时保留并写明差异；明确证伪时先写带 `supersedes` 的新 current，读回后再把旧条目移入同类 archive。检查：复现 source 不重复，不丢有效 source；不通过则保留原状。
+3. **去重、冲突、复现和纠正。** 先读 knowledge/experience 两个 current INDEX，用 title、scope、tags、source 简写和特异概括缩小候选，再比较候选正文的 id、标题、scope、source 和语义；纠错追溯时定向读取 archive INDEX。INDEX 缺失或失配时停止写入，先由本流程重建并验证。等价条目不新增：若后续独立事件与既有条目的问题模式、scope 和实质结论一致，并有新的可回查 source，则在 `recurrence/<entry-id>.md` 追加一条复现证据；同一会话的重复表述、命令重试、连续错误输出、普通读取或引用不计复现。新增复现时结合现场分析它为何再次发生，例如此前未被召回、适用边界判断不准、现场条件已经变化或原结论存在缺口；只把有证据的原因写入该行 `summary`。若新证据足以改变既有经验，则按原有结构修正其适用边界、失败边界、回查方法或实质结论；原因未收敛时只保留复现事实，不强行改写经验。未收敛冲突可同时保留并写明差异；明确证伪时先写带 `supersedes` 的新 current，读回后再把旧条目移入同类 archive。检查：复现 source 不重复，不丢有效 source，经验修正均有新证据支持；不通过则保留原状。
 4. **原子写入并读回。** 每条一个 Markdown，knowledge 的 id 使用 `k-` 前缀，experience 使用 `e-` 前缀，文件名等于 id；必填字段恰为 `id/title/scope/tags/learned_at/source`，可选 `supersedes`。使用同目录临时文件写完整内容，校验后原子替换：
 
    ```markdown
@@ -56,7 +56,7 @@ description: 在当前对话中自动发现 corrections、feature requests、kno
 
 ## Gotchas
 
-- `current` 只表示允许检索的线索，不表示已经验证；`archive` 只供追溯，默认不检索。不要增加 candidate、status、confidence、访问次数或普通使用次数。复现次数只是有独立证据的再次发生记录，不证明正确，也不自动改变排序或 current/archive。
+- `current` 只表示允许检索的线索，不表示已经验证；`archive` 只供追溯，默认不检索。不要增加 candidate、status、confidence、访问次数或普通使用次数。复现次数只是有独立证据的再次发生记录，不证明正确，也不自动改变排序或 current/archive；复现分析不生成防复发契约，不限制 Agent 结合当前现场自行判断，也不自动下沉为 Skill、项目规则或执行门禁。
 - `scope` 选择已明确的最窄范围；易变事实不保存成长期现值。凭据、隐私、客户原文、长会话和未脱敏内容不写入。
 - 小修可原位更新；实质纠正必须先保住完整新旧内容再归档。模糊的“忘记”不能扩大成广泛删除。
 - 一项失败不回滚其他已验证项；不确定时宁可不写，也不伪造 source 或强行消解冲突。
