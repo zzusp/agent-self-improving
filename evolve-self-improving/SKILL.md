@@ -18,7 +18,7 @@ description: 在当前对话中自动发现 corrections、feature requests、kno
 
 1. **准备并捕获。** 数据根使用 `~/.agent-knowledge/`。根不存在时，只初始化本流程需要的 `knowledge/{current,archive}/`、`experience/{current,archive}/`、四个空 `INDEX.md`、最小 README 和 `maintenance.md`，不创建其他索引或状态。识别 correction、feature-request、knowledge-gap、error 或主动记忆信号，记录待评估结论、原始证据、适用范围和复核方式；这些词可作为 tags，但不新增类别字段。检查：来源应可回查且结论不是猜测；不通过则不写，必要时最多问一个自然问题。
 2. **判断资格和分类。** 稳定条目必须同时满足：有原文件、命令回读、现场或明确确认支持；跨会话仍有意义，易变值只保存权威入口和核验方法；可在相同条件下复用；scope 和不适用边界清楚；已脱敏且能明确归为事实或方法。稳定事实、定义、职责、入口和约束归 knowledge；方法、条件、失败模式和护栏归 experience。检查：五项必须全部成立；不通过则说明为什么未沉淀。
-3. **去重、冲突和纠正。** 先读 knowledge/experience 两个 current INDEX，用 title、scope、tags、source 简写和特异概括缩小候选，再比较候选正文的 id、标题、scope、source 和语义；纠错追溯时定向读取 archive INDEX。INDEX 缺失或失配时停止写入，先由本流程重建并验证，不能在导航失配状态继续新增。等价条目不新增，只合并真实新证据；未收敛冲突可同时保留并写明差异；明确证伪时先写带 `supersedes` 的新 current，读回后再把旧条目移入同类 archive。检查：不丢有效 source，旧条目只有在明确失效或被替代后才归档；不通过则保留原状。
+3. **去重、冲突、复现和纠正。** 先读 knowledge/experience 两个 current INDEX，用 title、scope、tags、source 简写和特异概括缩小候选，再比较候选正文的 id、标题、scope、source 和语义；纠错追溯时定向读取 archive INDEX。INDEX 缺失或失配时停止写入，先由本流程重建并验证。等价条目不新增：若后续独立事件与既有条目的问题模式、scope 和实质结论一致，并有新的可回查 source，则在 `recurrence/<entry-id>.md` 追加一条复现证据；同一会话的重复表述、命令重试、连续错误输出、普通读取或引用不计复现。未收敛冲突可同时保留并写明差异；明确证伪时先写带 `supersedes` 的新 current，读回后再把旧条目移入同类 archive。检查：复现 source 不重复，不丢有效 source；不通过则保留原状。
 4. **原子写入并读回。** 每条一个 Markdown，knowledge 的 id 使用 `k-` 前缀，experience 使用 `e-` 前缀，文件名等于 id；必填字段恰为 `id/title/scope/tags/learned_at/source`，可选 `supersedes`。使用同目录临时文件写完整内容，校验后原子替换：
 
    ```markdown
@@ -35,18 +35,28 @@ description: 在当前对话中自动发现 corrections、feature requests、kno
 
    正文有效字符不是 token 或英文 word：取第二个 `---` 后的 Markdown，去除空白、标题/列表/引用/代码围栏等控制符、强调或行内代码控制符和链接目标 URL，保留链接文字、正文文字与正文标点，再按 Unicode code point 计数；区间含 300 和 400。knowledge 正文覆盖稳定事实或定义、适用边界、使用方式、回查方法；experience 覆盖适用条件、问题或风险、推荐做法、失败边界、回查方法。禁止用重复句、无意义模板、URL、代码或标点凑字。
 
-   每次新增、修改、纠正、归档、移动或删除后，使用随包 `scripts/validate_entries.py render-index --directory <目录>` 生成受影响目录的完整 INDEX 临时文本；条目与 INDEX 都校验后再原子替换并读回。INDEX 自身不是条目且豁免字数。检查：运行 `check --file <条目>` 和 `check --root ~/.agent-knowledge/`，确认 UTF-8、无 BOM、无尾随空白、id=filename、source 非空、正文 300–400、四索引双射且按 learned_at 降序再 id 稳定排序；不通过则只停止这一项，恢复该项写前条目和索引，不把条目成功、索引失配说成完成。
+   复现记录每个条目最多一个文件，文件名等于 entry id；首次沉淀不算复现，无文件即为 0 次：
+
+   ```markdown
+   # e-YYYYMMDD-HHmmss-short-slug 复现记录
+
+   | observed_at | source | scope | signal | summary |
+   |---|---|---|---|---|
+   | 2026-08-20 | conversation:<opaque-ref> | dataset | correction | 新的独立事件再次证明同一问题模式 |
+   ```
+
+   `signal` 只使用 `correction/feature-request/knowledge-gap/error`。每次新增、修改、纠正、复现、归档、移动或删除后，使用随包 `scripts/validate_entries.py render-index --directory <目录>` 生成受影响目录的完整 INDEX 临时文本；条目、复现记录与 INDEX 都校验后再原子替换并读回。检查：运行 `check --file <条目>` 和 `check --root ~/.agent-knowledge/`，确认正文 300–400、复现文件逐行有据且 source 唯一、INDEX 次数和最近日期由证据计算、四索引双射；不通过则恢复本项写前条目、复现记录和索引，不把部分成功说成完成。
 5. **自然维护并报告。** 每次被调用时读取 `maintenance.md`；距 `last_reviewed_at` 满 7 天才检查 current 的来源、重复、冲突、过时风险和敏感泄漏，全部成功后写回日期。删除只在用户明确指定条目或范围时执行，先验证目标位于拥有目录且不是链接。检查：逐项读回新增、修改、归档或删除结果；不通过则保留已成功项，用普通话说明权限、磁盘或格式故障和剩余项，不把部分成功说成全部完成。
 
 ## Tools and data sources
 
-- 只读原文件、当前代码、配置、命令回读和运行现场；写入范围仅为 `knowledge/`、`experience/`、根最小 README 与 `maintenance.md`。
+- 只读原文件、当前代码、配置、命令回读和运行现场；写入范围仅为 `knowledge/`、`experience/`、按需创建的 `recurrence/`、根最小 README 与 `maintenance.md`。
 - 使用宿主原生安全文件 API、固定字符串搜索和 Markdown/frontmatter 解析器；随包标准库工具只读校验或把 INDEX 文本输出到 stdout，不直接修改知识库，也不依赖网络、服务或后台任务。
 - `source` 可为非空列表；确认只能追加，不能替换原始文件或现场证据。
 
 ## Gotchas
 
-- `current` 只表示允许检索的线索，不表示已经验证；`archive` 只供追溯，默认不检索。不要增加 candidate、status、confidence 或使用计数。
+- `current` 只表示允许检索的线索，不表示已经验证；`archive` 只供追溯，默认不检索。不要增加 candidate、status、confidence、访问次数或普通使用次数。复现次数只是有独立证据的再次发生记录，不证明正确，也不自动改变排序或 current/archive。
 - `scope` 选择已明确的最窄范围；易变事实不保存成长期现值。凭据、隐私、客户原文、长会话和未脱敏内容不写入。
 - 小修可原位更新；实质纠正必须先保住完整新旧内容再归档。模糊的“忘记”不能扩大成广泛删除。
 - 一项失败不回滚其他已验证项；不确定时宁可不写，也不伪造 source 或强行消解冲突。
