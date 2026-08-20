@@ -14,6 +14,7 @@ from typing import Any
 
 REQUIRED_FIELDS = ("id", "title", "scope", "tags", "learned_at", "source")
 OPTIONAL_FIELDS = ("supersedes",)
+RECURRENCE_SIGNALS = {"correction", "feature-request", "knowledge-gap", "error"}
 TARGET_DIRECTORIES = (
     "knowledge/current",
     "knowledge/archive",
@@ -206,13 +207,73 @@ def display_source(value: Any) -> str:
     return "<br>".join(shown)
 
 
+def load_recurrences(root: Path, known_ids: set[str]) -> tuple[dict[str, list[dict[str, str]]], list[Failure]]:
+    directory = root / "recurrence"
+    if not directory.exists():
+        return {}, []
+    if not directory.is_dir():
+        return {}, [failure("E_RECURRENCE_DIRECTORY", directory, "directory", "not a directory", "恢复 recurrence 目录后重验。")]
+    records: dict[str, list[dict[str, str]]] = {}
+    failures: list[Failure] = []
+    expected_header = "| observed_at | source | scope | signal | summary |"
+    expected_rule = "|---|---|---|---|---|"
+    for path in sorted(directory.glob("*.md")):
+        text, item_failures = strict_text(path)
+        failures.extend(item_failures)
+        if text is None:
+            continue
+        entry_id = path.stem
+        if entry_id not in known_ids:
+            failures.append(failure("E_RECURRENCE_ORPHAN", path, "existing knowledge/experience id", entry_id, "删除孤儿记录或恢复对应条目。"))
+        lines = text.splitlines()
+        if len(lines) < 5 or lines[0] != f"# {entry_id} 复现记录" or lines[2] != expected_header or lines[3] != expected_rule:
+            failures.append(failure("E_RECURRENCE_FORMAT", path, "title + fixed five-column table", lines[:4], "按 Skill 的复现表格格式修正。"))
+            continue
+        seen_sources: set[str] = set()
+        rows: list[dict[str, str]] = []
+        for number, line in enumerate(lines[4:], 5):
+            if not line.strip():
+                continue
+            cells = [value.strip() for value in line.strip().strip("|").split("|")]
+            if len(cells) != 5:
+                failures.append(failure("E_RECURRENCE_ROW", path, "five cells", {"line": number, "value": line}, "修正该证据行。"))
+                continue
+            observed_at, source, scope, signal, summary = cells
+            if not DATE_RE.fullmatch(observed_at):
+                failures.append(failure("E_RECURRENCE_DATE", path, "YYYY-MM-DD", observed_at, "修正复现日期。"))
+            if not source or source in seen_sources:
+                failures.append(failure("E_RECURRENCE_SOURCE", path, "unique non-empty source", source, "移除重复来源或补充新的独立来源。"))
+            elif source.startswith("file:"):
+                source_path = Path(source[5:])
+                if not source_path.is_absolute() or not source_path.is_file():
+                    failures.append(failure("E_RECURRENCE_SOURCE_PATH", path, "existing absolute file source", source, "回查并修正复现来源；不要猜路径。"))
+            elif not source.startswith(("conversation:", "command:")) and source != "human-confirmation":
+                failures.append(failure("E_RECURRENCE_SOURCE_KIND", path, "traceable source", source, "使用 file:/conversation:/command:/human-confirmation 来源。"))
+            seen_sources.add(source)
+            if not scope or not summary:
+                failures.append(failure("E_RECURRENCE_CONTENT", path, "non-empty scope and summary", cells, "补齐适用范围和特异概括。"))
+            if signal not in RECURRENCE_SIGNALS:
+                failures.append(failure("E_RECURRENCE_SIGNAL", path, sorted(RECURRENCE_SIGNALS), signal, "使用四类学习信号之一。"))
+            rows.append({"observed_at": observed_at, "source": source, "scope": scope, "signal": signal, "summary": summary})
+        if not rows:
+            failures.append(failure("E_RECURRENCE_EMPTY", path, "at least one evidence row", 0, "没有复现时删除该文件。"))
+        records[entry_id] = rows
+    return records, failures
+
+
 def cell(value: Any) -> str:
     if isinstance(value, list):
         value = ", ".join(str(item) for item in value)
     return str(value).replace("|", "\\|").replace("\r", " ").replace("\n", " ")
 
 
-def render_index(directory: Path, entries: list[Entry]) -> str:
+def recurrence_label(records: list[dict[str, str]]) -> str:
+    if not records:
+        return "0"
+    return f"{len(records)}（最近 {max(item['observed_at'] for item in records)}）"
+
+
+def render_index(directory: Path, entries: list[Entry], recurrences: dict[str, list[dict[str, str]]] | None = None) -> str:
     kind = "知识" if "knowledge" in directory.parts else "经验"
     state = "当前" if directory.name == "current" else "归档"
     lines = [
@@ -220,8 +281,8 @@ def render_index(directory: Path, entries: list[Entry]) -> str:
         "",
         "本文件只用于缩小只读检索候选；结论仍须打开条目并按来源回查。",
         "",
-        "| 条目 | title | scope | tags | learned_at | source | 特异概括 |",
-        "|---|---|---|---|---|---|---|",
+        "| 条目 | title | scope | tags | learned_at | source | 复现 | 特异概括 |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     ordered = sorted(entries, key=lambda entry: entry.metadata["id"])
     ordered.sort(key=lambda entry: entry.metadata["learned_at"], reverse=True)
@@ -237,6 +298,7 @@ def render_index(directory: Path, entries: list[Entry]) -> str:
                     cell(meta["tags"]),
                     cell(meta["learned_at"]),
                     cell(display_source(meta["source"])),
+                    cell(recurrence_label((recurrences or {}).get(str(meta["id"]), []))),
                     cell(first_summary(entry.body)),
                 )
             ) + " |"
@@ -244,7 +306,7 @@ def render_index(directory: Path, entries: list[Entry]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def check_directory(directory: Path) -> tuple[list[Entry], list[Failure]]:
+def read_directory(directory: Path) -> tuple[list[Entry], list[Failure]]:
     entries: list[Entry] = []
     failures: list[Failure] = []
     for path in sorted(directory.glob("*.md")):
@@ -254,13 +316,6 @@ def check_directory(directory: Path) -> tuple[list[Entry], list[Failure]]:
         failures.extend(item_failures)
         if entry:
             entries.append(entry)
-    index_path = directory / "INDEX.md"
-    actual, index_failures = strict_text(index_path)
-    failures.extend(index_failures)
-    if actual is not None:
-        expected = render_index(directory, entries)
-        if actual != expected:
-            failures.append(failure("E_INDEX_MISMATCH", index_path, expected, actual, "用 render-index 原子重建并读回该目录索引。"))
     return entries, failures
 
 
@@ -288,12 +343,28 @@ def command_check_root(root: Path) -> tuple[dict[str, Any], int]:
         if not directory.is_dir():
             failures.append(failure("E_DIRECTORY", directory, "existing directory", "missing", "补齐认知目录。"))
             continue
-        found, item_failures = check_directory(directory)
+        found, item_failures = read_directory(directory)
         entries.extend(found)
         failures.extend(item_failures)
         per_directory[relative] = len(found)
+    recurrences, recurrence_failures = load_recurrences(root, {str(entry.metadata["id"]) for entry in entries})
+    failures.extend(recurrence_failures)
+    for relative in TARGET_DIRECTORIES:
+        directory = root / relative
+        if not directory.is_dir():
+            continue
+        directory_entries = [entry for entry in entries if entry.path.parent == directory]
+        index_path = directory / "INDEX.md"
+        actual, index_failures = strict_text(index_path)
+        failures.extend(index_failures)
+        if actual is not None:
+            expected = render_index(directory, directory_entries, recurrences)
+            if actual != expected:
+                failures.append(failure("E_INDEX_MISMATCH", index_path, expected, actual, "用 render-index 原子重建并读回该目录索引。"))
     result = report("root", entries, failures)
     result["counts"]["directories"] = per_directory
+    result["counts"]["recurrence_files"] = len(recurrences)
+    result["counts"]["recurrences"] = sum(len(items) for items in recurrences.values())
     return result, 0 if not failures else 1
 
 
@@ -330,10 +401,18 @@ def main() -> int:
             failures.extend(item_failures)
             if entry:
                 entries.append(entry)
+        root = args.directory.parent.parent
+        known_ids: set[str] = set()
+        for relative in TARGET_DIRECTORIES:
+            for path in (root / relative).glob("*.md"):
+                if path.name != "INDEX.md":
+                    known_ids.add(path.stem)
+        recurrences, recurrence_failures = load_recurrences(root, known_ids)
+        failures.extend(recurrence_failures)
         if failures:
             print(json.dumps(report("render-index", entries, failures), ensure_ascii=False, indent=2), file=sys.stderr)
             return 1
-        sys.stdout.write(render_index(args.directory, entries))
+        sys.stdout.write(render_index(args.directory, entries, recurrences))
         return 0
     result, code = command_check_root(args.root) if args.root else command_check_file(args.file)
     if args.json:
