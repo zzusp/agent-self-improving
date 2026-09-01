@@ -11,6 +11,7 @@
 - legacy experience 迁移现在无需 scope map；非 global scope 原样进入统一 memory，正文、来源、日期、归档状态和复现仍保持。
 - 本机项目桶迁移 `-Check` 得到 59 条源 memory、0 重复 id、0 blocker；`-Apply` 后独立 root 校验得到 88 个条目、0 failure。
 - 旧备份与新目录逐条比较为 59/59、0 mismatch；新目录只含 current/archive，`scope: repo:` 和 staging 残留均为 0。
+- 随后从最早的 legacy experience 备份重新直迁：`--check` 扫描并计划 59 条、识别 1 个旧复现、0 blocker；原子替换后 root 仍为 88 个条目、0 failure。原 experience 与新 memory 的正文/title/scope/date 为 59/59、0 mismatch，重迁移前后 memory 的逐文件 SHA 也为 0 mismatch。
 - 统一 `MEMORY.md` 为 63 行、25696 bytes，验证只保留 200 行门禁即可承载当前数据，无需项目桶或 25KB 门禁。
 - 本地数据根 README 与两个 Skill 都只声明统一 memory 目录及标签式 scope。
 
