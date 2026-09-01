@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
-"""把 legacy experience 迁移为分作用域 memory；默认 --check 零副作用。"""
+"""把 legacy experience 迁移到统一 memory；默认 --check 零副作用。"""
 
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
-import re
 import shutil
-import subprocess
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -19,80 +16,9 @@ from typing import Any
 import validate_entries as validator
 
 
-def normalized_path(path: Path) -> str:
-    value = str(path.resolve()).replace("\\", "/")
-    return value.casefold() if os.name == "nt" else value
-
-
-def slug(value: str) -> str:
-    result = re.sub(r"[^a-z0-9]+", "-", value.casefold()).strip("-")
-    return (result or "repository")[:48].rstrip("-")
-
-
 def is_linklike(path: Path) -> bool:
     is_junction = getattr(path, "is_junction", lambda: False)
     return path.is_symlink() or is_junction()
-
-
-def git_value(repository: Path, *args: str) -> str:
-    completed = subprocess.run(
-        ["git", "-C", str(repository), *args],
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    if completed.returncode != 0:
-        raise ValueError(completed.stderr.strip() or f"git exited {completed.returncode}")
-    return completed.stdout.strip()
-
-
-def resolve_repository(repository: Path) -> dict[str, Any]:
-    if not repository.is_dir():
-        raise ValueError("mapped project path is not an existing directory")
-    if is_linklike(repository):
-        raise ValueError("mapped project path must not be a link or junction")
-    try:
-        root = Path(git_value(repository, "rev-parse", "--path-format=absolute", "--show-toplevel"))
-        common = Path(git_value(repository, "rev-parse", "--path-format=absolute", "--git-common-dir"))
-    except ValueError:
-        root = repository.resolve()
-        common = None
-        identity = "directory:" + normalized_path(root)
-        repository_name = root.name
-        identity_kind = "directory"
-    else:
-        identity = normalized_path(common)
-        repository_name = common.parent.name if common.name.casefold() == ".git" else common.stem
-        identity_kind = "git"
-    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:12]
-    return {
-        "project_key": f"{slug(repository_name)}-{digest}",
-        "identity_kind": identity_kind,
-        "identity": identity,
-        "git_common_dir": normalized_path(common) if common is not None else None,
-        "root": normalized_path(root),
-    }
-
-
-def load_scope_map(path: Path | None) -> tuple[dict[str, Path], list[str]]:
-    if path is None:
-        return {}, []
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        return {}, [f"scope map unreadable: {exc}"]
-    if not isinstance(data, dict):
-        return {}, ["scope map must be a JSON object of exact legacy scope to repository path"]
-    result: dict[str, Path] = {}
-    errors: list[str] = []
-    for scope, value in data.items():
-        if not isinstance(scope, str) or not isinstance(value, str) or not Path(value).is_absolute():
-            errors.append(f"invalid scope map entry: {scope!r}")
-            continue
-        result[scope] = Path(value)
-    return result, errors
 
 
 def load_legacy(path: Path) -> tuple[dict[str, Any] | None, str, list[str]]:
@@ -130,13 +56,11 @@ def load_legacy(path: Path) -> tuple[dict[str, Any] | None, str, list[str]]:
     return metadata, body, errors
 
 
-def make_plan(root: Path, scope_map_path: Path | None) -> dict[str, Any]:
+def make_plan(root: Path) -> dict[str, Any]:
     experience = root / "experience"
-    mapping, blockers = load_scope_map(scope_map_path)
+    blockers: list[str] = []
     entries: list[dict[str, Any]] = []
-    repositories: dict[str, dict[str, Any]] = {}
     legacy_ids: set[str] = set()
-    missing_scopes: set[str] = set()
     scanned_entries = 0
     if not experience.is_dir():
         blockers.append("legacy experience directory is missing")
@@ -157,35 +81,6 @@ def make_plan(root: Path, scope_map_path: Path | None) -> dict[str, Any]:
                 continue
             old_scope = str(metadata["scope"])
             legacy_ids.add(str(metadata["id"]))
-            destination: dict[str, Any]
-            if old_scope == "global":
-                destination = {"kind": "global", "scope": "global", "project_key": None}
-            elif old_scope not in mapping:
-                missing_scopes.add(old_scope)
-                continue
-            else:
-                try:
-                    repository = resolve_repository(mapping[old_scope])
-                except ValueError as exc:
-                    blockers.append(f"scope {old_scope}: {exc}")
-                    continue
-                key = str(repository["project_key"])
-                existing = repositories.get(key)
-                if existing and existing["identity"] != repository["identity"]:
-                    blockers.append(f"project key collision: {key}")
-                    continue
-                if existing:
-                    roots = existing.setdefault("roots", [existing["root"]])
-                    if repository["root"] not in roots:
-                        roots.append(repository["root"])
-                else:
-                    repository["roots"] = [repository["root"]]
-                    repositories[key] = repository
-                destination = {
-                    "kind": "project",
-                    "scope": f"repo:{key}/{old_scope}",
-                    "project_key": key,
-                }
             entries.append(
                 {
                     "source": str(path),
@@ -193,10 +88,9 @@ def make_plan(root: Path, scope_map_path: Path | None) -> dict[str, Any]:
                     "old_id": metadata["id"],
                     "new_id": "m-" + str(metadata["id"])[2:],
                     "old_scope": old_scope,
-                    **destination,
+                    "scope": old_scope,
                 }
             )
-    blockers.extend(f"missing exact scope mapping: {scope}" for scope in sorted(missing_scopes))
     recurrence_directory = root / "recurrence"
     recurrence_ids = {
         path.stem for path in recurrence_directory.glob("e-*.md")
@@ -219,10 +113,7 @@ def make_plan(root: Path, scope_map_path: Path | None) -> dict[str, Any]:
             if metadata is None or errors:
                 blockers.append(f"legacy entry changed during check: {item['source']}")
                 continue
-            if item["kind"] == "global":
-                directory = root / "memory/global" / item["state"]
-            else:
-                directory = root / "memory/projects" / item["project_key"] / item["state"]
+            directory = root / "memory" / item["state"]
             destination = directory / f"{item['new_id']}.md"
             values = migrated_metadata(metadata, item)
             groups.setdefault(directory, []).append(
@@ -241,11 +132,9 @@ def make_plan(root: Path, scope_map_path: Path | None) -> dict[str, Any]:
         "counts": {
             "scanned_entries": scanned_entries,
             "planned_entries": len(entries),
-            "repositories": len(repositories),
             "legacy_recurrences": len(recurrence_ids),
             "blockers": len(blockers),
         },
-        "repositories": repositories,
         "entries": entries,
         "blockers": blockers,
     }
@@ -320,18 +209,8 @@ def build_staging(root: Path, plan: dict[str, Any]) -> Path:
 
 def build_staging_contents(root: Path, plan: dict[str, Any], stage_root: Path) -> Path:
     memory_root = stage_root / "memory"
-    for relative in ("global/current", "global/archive", "projects"):
+    for relative in ("current", "archive"):
         (memory_root / relative).mkdir(parents=True, exist_ok=True)
-    for key, repository in plan["repositories"].items():
-        project = memory_root / "projects" / key
-        (project / "current").mkdir(parents=True)
-        (project / "archive").mkdir()
-        scope = {
-            "project_key": key,
-            "git_common_dir": repository["git_common_dir"],
-            "roots": repository["roots"],
-        }
-        write_atomic(project / "scope.json", json.dumps(scope, ensure_ascii=False, indent=2) + "\n")
     recurrence_stage = stage_root / "recurrence"
     recurrence_stage.mkdir()
     for item in plan["entries"]:
@@ -339,10 +218,7 @@ def build_staging_contents(root: Path, plan: dict[str, Any], stage_root: Path) -
         metadata, body, errors = load_legacy(source)
         if metadata is None or errors:
             raise ValueError(f"legacy entry changed after check: {source}")
-        if item["kind"] == "global":
-            directory = memory_root / "global" / item["state"]
-        else:
-            directory = memory_root / "projects" / item["project_key"] / item["state"]
+        directory = memory_root / item["state"]
         destination = directory / f"{item['new_id']}.md"
         write_atomic(destination, serialize_memory(metadata, body, item))
         _, entry_failures = validator.load_entry(destination)
@@ -356,8 +232,7 @@ def build_staging_contents(root: Path, plan: dict[str, Any], stage_root: Path) -
                 convert_recurrence(text, str(item["old_id"]), str(item["new_id"])),
             )
     all_entries: list[validator.Entry] = []
-    directories: list[Path] = [memory_root / "global/current", memory_root / "global/archive"]
-    directories.extend(path for project in (memory_root / "projects").iterdir() for path in (project / "current", project / "archive"))
+    directories: list[Path] = [memory_root / "current", memory_root / "archive"]
     for directory in directories:
         entries, failures = validator.read_directory(directory)
         if failures:
@@ -445,7 +320,6 @@ def build_parser() -> argparse.ArgumentParser:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check", action="store_true")
     mode.add_argument("--apply", action="store_true")
-    parser.add_argument("--scope-map", type=Path)
     return parser
 
 
@@ -453,7 +327,7 @@ def main() -> int:
     validator.configure_utf8()
     args = build_parser().parse_args()
     root = args.root.resolve()
-    plan = make_plan(root, args.scope_map)
+    plan = make_plan(root)
     if args.check or plan["status"] != "ready":
         print(json.dumps(plan, ensure_ascii=False, indent=2))
         return 0 if plan["status"] == "ready" else 1

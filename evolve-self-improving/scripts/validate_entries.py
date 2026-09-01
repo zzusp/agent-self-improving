@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""只读校验 knowledge/memory 条目、仓库作用域和确定性导航。"""
+"""只读校验 knowledge/memory 条目和确定性导航。"""
 
 from __future__ import annotations
 
@@ -19,10 +19,8 @@ MEMORY_TYPES = {"user", "feedback", "project", "reference", "lesson"}
 RECURRENCE_SIGNALS = {"correction", "feature-request", "knowledge-gap", "error"}
 KNOWLEDGE_DIRECTORIES = ("knowledge/current", "knowledge/archive")
 INDEX_MAX_LINES = 200
-INDEX_MAX_BYTES = 25 * 1024
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
 TIMESTAMP_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\Z")
-PROJECT_KEY_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,62}-[0-9a-f]{12}\Z")
 FENCE_RE = re.compile(r"(?m)^\s*(```+|~~~+).*$")
 LINK_RE = re.compile(r"!?\[([^\]]*)\]\([^)]*\)")
 LINE_PREFIX_RE = re.compile(r"(?m)^\s{0,3}(?:#{1,6}\s+|>\s*|[-+*]\s+|\d+[.)]\s+)")
@@ -153,18 +151,16 @@ def first_summary(body: str) -> str:
     return summary[:88]
 
 
-def memory_location(path: Path) -> tuple[str, str | None] | None:
+def memory_location(path: Path) -> str | None:
     parts = path.parts
     try:
         index = parts.index("memory")
     except ValueError:
         return None
     suffix = parts[index + 1 :]
-    if len(suffix) >= 2 and suffix[0] == "global":
-        return "global", None
-    if len(suffix) >= 3 and suffix[0] == "projects":
-        return "project", suffix[1]
-    return "invalid", None
+    if len(suffix) >= 2 and suffix[0] in {"current", "archive"}:
+        return suffix[0]
+    return "invalid"
 
 
 def load_entry(path: Path, enforce_length: bool = True) -> tuple[Entry | None, list[Failure]]:
@@ -193,19 +189,14 @@ def load_entry(path: Path, enforce_length: bool = True) -> tuple[Entry | None, l
     if not DATE_RE.fullmatch(str(metadata.get("learned_at", ""))):
         failures.append(failure("E_DATE", path, "YYYY-MM-DD", metadata.get("learned_at"), "修正 learned_at。"))
     if is_memory:
-        if location and location[0] == "invalid":
-            failures.append(failure("E_MEMORY_LOCATION", path, "memory/global or memory/projects/<key>", str(path.parent), "移动到合法记忆作用域。"))
+        if location == "invalid":
+            failures.append(failure("E_MEMORY_LOCATION", path, "memory/current or memory/archive", str(path.parent), "移动到统一记忆目录。"))
         if metadata.get("type") not in MEMORY_TYPES:
             failures.append(failure("E_MEMORY_TYPE", path, sorted(MEMORY_TYPES), metadata.get("type"), "使用五类记忆 type 之一。"))
         if not TIMESTAMP_RE.fullmatch(str(metadata.get("modified_at", ""))):
             failures.append(failure("E_MODIFIED_AT", path, "UTC YYYY-MM-DDTHH:MM:SSZ", metadata.get("modified_at"), "写入可比较的 UTC 修改时点。"))
-        scope = str(metadata.get("scope", ""))
-        if location and location[0] == "global" and scope != "global":
-            failures.append(failure("E_MEMORY_SCOPE", path, "global", scope, "全局记忆必须使用 global scope。"))
-        if location and location[0] == "project":
-            project_key = location[1] or ""
-            if not scope.startswith(f"repo:{project_key}"):
-                failures.append(failure("E_MEMORY_SCOPE", path, f"repo:{project_key}", scope, "让项目记忆 scope 与物理仓库桶一致。"))
+        if not isinstance(metadata.get("scope"), str) or not str(metadata["scope"]).strip():
+            failures.append(failure("E_MEMORY_SCOPE", path, "non-empty scope label", metadata.get("scope"), "写入 global 或业务上下文 scope 标签。"))
     if not isinstance(metadata.get("tags"), list) or not metadata.get("tags"):
         failures.append(failure("E_TAGS", path, "non-empty inline list", metadata.get("tags"), "写入非空 tags 列表。"))
     source = metadata.get("source")
@@ -371,11 +362,8 @@ def index_limit_failures(path: Path, text: str) -> list[Failure]:
         return []
     failures: list[Failure] = []
     line_count = len(text.splitlines())
-    byte_count = len(text.encode("utf-8"))
     if line_count > INDEX_MAX_LINES:
         failures.append(failure("E_MEMORY_INDEX_LINES", path, f"<= {INDEX_MAX_LINES}", line_count, "合并或归档低价值记忆后重建索引。"))
-    if byte_count > INDEX_MAX_BYTES:
-        failures.append(failure("E_MEMORY_INDEX_BYTES", path, f"<= {INDEX_MAX_BYTES}", byte_count, "缩短索引概括、合并或归档记忆后重建。"))
     return failures
 
 
@@ -392,31 +380,6 @@ def read_directory(directory: Path) -> tuple[list[Entry], list[Failure]]:
     return entries, failures
 
 
-def load_project_scope(project_directory: Path) -> list[Failure]:
-    path = project_directory / "scope.json"
-    try:
-        raw = path.read_text(encoding="utf-8")
-        data = json.loads(raw)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        return [failure("E_PROJECT_SCOPE_FILE", path, "readable UTF-8 JSON", str(exc), "重建仓库作用域清单。")]
-    if not isinstance(data, dict):
-        return [failure("E_PROJECT_SCOPE_FIELDS", path, "JSON object", type(data).__name__, "重建固定字段的作用域对象。")]
-    failures: list[Failure] = []
-    key = project_directory.name
-    expected_fields = {"project_key", "git_common_dir", "roots"}
-    if set(data) != expected_fields:
-        failures.append(failure("E_PROJECT_SCOPE_FIELDS", path, sorted(expected_fields), sorted(data), "只保留固定作用域字段。"))
-    if data.get("project_key") != key or not PROJECT_KEY_RE.fullmatch(key):
-        failures.append(failure("E_PROJECT_KEY", path, key, data.get("project_key"), "使用 slug + 12 位 identity hash。"))
-    git_common_dir = data.get("git_common_dir")
-    if git_common_dir is not None and (not isinstance(git_common_dir, str) or not Path(git_common_dir).is_absolute()):
-        failures.append(failure("E_GIT_COMMON_DIR", path, "absolute normalized path or null", git_common_dir, "Git 项目记录绝对 common dir；非 Git 工作区使用 null。"))
-    roots = data.get("roots")
-    if not isinstance(roots, list) or not roots or any(not isinstance(item, str) or not Path(item).is_absolute() for item in roots):
-        failures.append(failure("E_PROJECT_ROOTS", path, "non-empty absolute path list", roots, "记录至少一个仓库根路径别名。"))
-    return failures
-
-
 def discover_directories(root: Path) -> tuple[list[DirectorySpec], list[Failure]]:
     specs = [
         DirectorySpec(relative, root / relative, "INDEX.md")
@@ -424,28 +387,16 @@ def discover_directories(root: Path) -> tuple[list[DirectorySpec], list[Failure]
     ]
     specs.extend(
         (
-            DirectorySpec("memory/global/current", root / "memory/global/current", "MEMORY.md"),
-            DirectorySpec("memory/global/archive", root / "memory/global/archive", "INDEX.md"),
+            DirectorySpec("memory/current", root / "memory/current", "MEMORY.md"),
+            DirectorySpec("memory/archive", root / "memory/archive", "INDEX.md"),
         )
     )
     failures: list[Failure] = []
-    projects = root / "memory/projects"
-    if not projects.is_dir():
-        failures.append(failure("E_DIRECTORY", projects, "existing directory", "missing", "初始化 memory/projects。"))
-        return specs, failures
-    for project in sorted(path for path in projects.iterdir() if path.is_dir()):
-        is_junction = getattr(project, "is_junction", lambda: False)
-        if project.is_symlink() or is_junction():
-            failures.append(failure("E_PROJECT_LINK", project, "real directory", "link or junction", "移除重解析入口并使用真实目录。"))
-            continue
-        failures.extend(load_project_scope(project))
-        relative = f"memory/projects/{project.name}"
-        specs.extend(
-            (
-                DirectorySpec(f"{relative}/current", project / "current", "MEMORY.md"),
-                DirectorySpec(f"{relative}/archive", project / "archive", "INDEX.md"),
-            )
-        )
+    memory = root / "memory"
+    if memory.is_dir():
+        unexpected = sorted(path.name for path in memory.iterdir() if path.name not in {"current", "archive"})
+        if unexpected:
+            failures.append(failure("E_MEMORY_LAYOUT", memory, ["archive", "current"], unexpected, "迁移到统一 memory/current 与 memory/archive。"))
     return specs, failures
 
 

@@ -35,30 +35,13 @@ class ValidateEntriesTest(unittest.TestCase):
         directories = (
             (root / "knowledge/current", "INDEX.md"),
             (root / "knowledge/archive", "INDEX.md"),
-            (root / "memory/global/current", "MEMORY.md"),
-            (root / "memory/global/archive", "INDEX.md"),
+            (root / "memory/current", "MEMORY.md"),
+            (root / "memory/archive", "INDEX.md"),
         )
         for directory, index_name in directories:
             directory.mkdir(parents=True)
             self.write_bytes(directory / index_name, validator.render_index(directory, []))
-        (root / "memory/projects").mkdir()
         (root / "recurrence").mkdir()
-
-    def add_project(self, root: Path, key: str = "example-aaaaaaaaaaaa") -> Path:
-        project = root / "memory/projects" / key
-        current = project / "current"
-        archive = project / "archive"
-        current.mkdir(parents=True)
-        archive.mkdir()
-        scope = {
-            "project_key": key,
-            "git_common_dir": str((root / "repository/.git").resolve()),
-            "roots": [str((root / "repository").resolve())],
-        }
-        self.write_bytes(project / "scope.json", json.dumps(scope, ensure_ascii=False, indent=2) + "\n")
-        self.write_bytes(current / "MEMORY.md", validator.render_index(current, []))
-        self.write_bytes(archive / "INDEX.md", validator.render_index(archive, []))
-        return project
 
     def write_memory(
         self,
@@ -125,12 +108,11 @@ class ValidateEntriesTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             self.initialize_root(root)
-            project = self.add_project(root)
             for index, memory_type in enumerate(sorted(validator.MEMORY_TYPES)):
                 path = self.write_memory(
-                    project / "current",
+                    root / "memory/current",
                     memory_type=memory_type,
-                    scope="repo:example-aaaaaaaaaaaa",
+                    scope="workspace:example",
                     entry_id=f"m-20260901-12000{index}-{memory_type}",
                 )
                 _, failures = validator.load_entry(path)
@@ -140,55 +122,52 @@ class ValidateEntriesTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             self.initialize_root(root)
-            project = self.add_project(root)
             path = self.write_memory(
-                project / "current",
+                root / "memory/current",
                 memory_type="lesson",
-                scope="repo:example-aaaaaaaaaaaa",
+                scope="workspace:example",
                 tags="oauth, callback-listener",
             )
             entry, failures = validator.load_entry(path)
             self.assertEqual([], failures)
-            rendered = validator.render_index(project / "current", [entry])
+            rendered = validator.render_index(root / "memory/current", [entry])
             self.assertIn("tags:oauth, callback-listener", rendered)
 
-    def test_memory_rejects_unknown_type_and_wrong_bucket_scope(self) -> None:
+    def test_memory_rejects_unknown_type_and_empty_scope(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             self.initialize_root(root)
-            project = self.add_project(root)
             path = self.write_memory(
-                project / "current",
+                root / "memory/current",
                 memory_type="experience",
-                scope="global",
+                scope="",
             )
             _, failures = validator.load_entry(path)
             codes = {item.code for item in failures}
             self.assertIn("E_MEMORY_TYPE", codes)
             self.assertIn("E_MEMORY_SCOPE", codes)
 
-    def test_root_discovers_project_bucket_and_lesson_recurrence(self) -> None:
+    def test_root_discovers_unified_memory_and_lesson_recurrence(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             self.initialize_root(root)
-            project = self.add_project(root)
             path = self.write_memory(
-                project / "current",
+                root / "memory/current",
                 memory_type="lesson",
-                scope="repo:example-aaaaaaaaaaaa/workspace:example",
+                scope="workspace:example",
             )
             recurrence = (
                 "# m-20260901-120000-testing 复现记录\n\n"
                 "| observed_at | source | scope | signal | summary |\n"
                 "|---|---|---|---|---|\n"
-                "| 2026-09-02 | human-confirmation | repo:example-aaaaaaaaaaaa | error | 再次验证同一问题模式 |\n"
+                "| 2026-09-02 | human-confirmation | workspace:example | error | 再次验证同一问题模式 |\n"
             )
             self.write_bytes(root / "recurrence/m-20260901-120000-testing.md", recurrence)
             entry, failures = validator.load_entry(path)
             self.assertEqual([], failures)
             records, failures = validator.load_recurrences(root, {str(entry.metadata["id"])})
             self.assertEqual([], failures)
-            self.write_bytes(project / "current/MEMORY.md", validator.render_index(project / "current", [entry], records))
+            self.write_bytes(root / "memory/current/MEMORY.md", validator.render_index(root / "memory/current", [entry], records))
 
             result, code = validator.command_check_root(root)
 
@@ -199,7 +178,7 @@ class ValidateEntriesTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             self.initialize_root(root)
-            directory = root / "memory/global/current"
+            directory = root / "memory/current"
             expected = (directory / "MEMORY.md").read_text(encoding="utf-8")
 
             rendered = subprocess.run(
@@ -220,9 +199,9 @@ class ValidateEntriesTest(unittest.TestCase):
             self.assertEqual(expected, rendered.stdout)
             self.assertEqual("pass", json.loads(checked.stdout)["status"])
 
-    def test_memory_index_enforces_line_and_byte_limits(self) -> None:
+    def test_memory_index_enforces_line_limit_only(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            directory = Path(temp) / "memory/global/current"
+            directory = Path(temp) / "memory/current"
             directory.mkdir(parents=True)
             entries = []
             for index in range(197):
@@ -239,7 +218,7 @@ class ValidateEntriesTest(unittest.TestCase):
             rendered = validator.render_index(directory, entries)
             codes = {item.code for item in validator.index_limit_failures(directory / "MEMORY.md", rendered)}
             self.assertIn("E_MEMORY_INDEX_LINES", codes)
-            self.assertIn("E_MEMORY_INDEX_BYTES", codes)
+            self.assertNotIn("E_MEMORY_INDEX_BYTES", codes)
 
     def test_root_rejects_unmigrated_experience(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -251,6 +230,17 @@ class ValidateEntriesTest(unittest.TestCase):
 
             self.assertEqual(1, code)
             self.assertIn("E_LEGACY_EXPERIENCE", {item["code"] for item in result["failures"]})
+
+    def test_root_rejects_old_project_memory_layout(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.initialize_root(root)
+            (root / "memory/projects").mkdir()
+
+            result, code = validator.command_check_root(root)
+
+            self.assertEqual(1, code)
+            self.assertIn("E_MEMORY_LAYOUT", {item["code"] for item in result["failures"]})
 
     def test_migration_preserves_legacy_lesson_and_recurrence(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -268,14 +258,14 @@ class ValidateEntriesTest(unittest.TestCase):
                 "|---|---|---|---|---|\n"
                 "| 2026-09-02 | human-confirmation | global | error | 再次验证同一问题模式 |\n",
             )
-            plan = migrator.make_plan(root, None)
+            plan = migrator.make_plan(root)
             self.assertEqual("ready", plan["status"], plan["blockers"])
 
             result = migrator.apply_plan(root, plan)
 
             self.assertEqual("pass", result["status"])
             self.assertFalse((root / "experience").exists())
-            migrated = root / "memory/global/current/m-20260901-120000-testing.md"
+            migrated = root / "memory/current/m-20260901-120000-testing.md"
             self.assertTrue(migrated.is_file())
             self.assertIn("type: lesson", migrated.read_text(encoding="utf-8"))
             self.assertTrue((root / "recurrence/m-20260901-120000-testing.md").is_file())
@@ -283,62 +273,25 @@ class ValidateEntriesTest(unittest.TestCase):
             checked, code = validator.command_check_root(root)
             self.assertEqual(0, code, checked["failures"])
 
-    def test_project_migration_requires_map_and_uses_repo_bucket(self) -> None:
+    def test_non_global_scope_migrates_without_project_mapping(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
             root = base / "knowledge-root"
-            repository = base / "repository"
-            subprocess.run(["git", "init", str(repository)], check=True, capture_output=True)
             for state in ("current", "archive"):
                 directory = root / "knowledge" / state
                 directory.mkdir(parents=True)
                 self.write_bytes(directory / "INDEX.md", validator.render_index(directory, []))
             (root / "recurrence").mkdir()
             self.write_legacy_experience(root, scope="workspace:example")
-            scope_map = base / "scope-map.json"
-            self.write_bytes(scope_map, json.dumps({"workspace:example": str(repository.resolve())}) + "\n")
 
-            blocked = migrator.make_plan(root, None)
-            plan = migrator.make_plan(root, scope_map)
+            plan = migrator.make_plan(root)
 
-            self.assertEqual("blocked", blocked["status"])
             self.assertEqual("ready", plan["status"], plan["blockers"])
             result = migrator.apply_plan(root, plan)
-            key = next(iter(plan["repositories"]))
-            migrated = root / "memory/projects" / key / "current/m-20260901-120000-testing.md"
+            migrated = root / "memory/current/m-20260901-120000-testing.md"
             self.assertEqual("pass", result["status"])
             self.assertTrue(migrated.is_file())
-            self.assertIn(f"scope: repo:{key}/workspace:example", migrated.read_text(encoding="utf-8"))
-
-    def test_non_git_workspace_migration_uses_directory_identity(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            base = Path(temp)
-            root = base / "knowledge-root"
-            workspace = base / "workspace"
-            workspace.mkdir()
-            for state in ("current", "archive"):
-                directory = root / "knowledge" / state
-                directory.mkdir(parents=True)
-                self.write_bytes(directory / "INDEX.md", validator.render_index(directory, []))
-            (root / "recurrence").mkdir()
-            self.write_legacy_experience(root, scope="workspace:example")
-            scope_map = base / "scope-map.json"
-            self.write_bytes(scope_map, json.dumps({"workspace:example": str(workspace.resolve())}) + "\n")
-
-            plan = migrator.make_plan(root, scope_map)
-
-            self.assertEqual("ready", plan["status"], plan["blockers"])
-            key = next(iter(plan["repositories"]))
-            project = plan["repositories"][key]
-            self.assertEqual("directory", project["identity_kind"])
-            self.assertIsNone(project["git_common_dir"])
-            result = migrator.apply_plan(root, plan)
-            scope = json.loads((root / "memory/projects" / key / "scope.json").read_text(encoding="utf-8"))
-            self.assertEqual("pass", result["status"])
-            self.assertIsNone(scope["git_common_dir"])
-            self.assertEqual([migrator.normalized_path(workspace)], scope["roots"])
-            checked, code = validator.command_check_root(root)
-            self.assertEqual(0, code, checked["failures"])
+            self.assertIn("scope: workspace:example", migrated.read_text(encoding="utf-8"))
 
     def test_failed_post_validation_restores_legacy_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -350,7 +303,7 @@ class ValidateEntriesTest(unittest.TestCase):
             self.write_bytes(root / "knowledge/current/INDEX.md", "broken\n")
             (root / "recurrence").mkdir()
             self.write_legacy_experience(root)
-            plan = migrator.make_plan(root, None)
+            plan = migrator.make_plan(root)
             self.assertEqual("ready", plan["status"], plan["blockers"])
 
             with self.assertRaises(ValueError):
@@ -365,7 +318,7 @@ class ValidateEntriesTest(unittest.TestCase):
             root = Path(temp)
             (root / "recurrence").mkdir()
             legacy = self.write_legacy_experience(root)
-            plan = migrator.make_plan(root, None)
+            plan = migrator.make_plan(root)
             self.assertEqual("ready", plan["status"], plan["blockers"])
             self.write_bytes(legacy, "changed after check\n")
 
@@ -375,18 +328,17 @@ class ValidateEntriesTest(unittest.TestCase):
             self.assertEqual([], list(root.glob(".memory-migration-*")))
             self.assertTrue((root / "experience").is_dir())
 
-    def test_check_blocks_project_scope_without_mapping_without_writes(self) -> None:
+    def test_check_accepts_non_global_scope_without_writes(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             (root / "recurrence").mkdir()
             self.write_legacy_experience(root, scope="workspace:example")
             before = sorted(str(path.relative_to(root)) for path in root.rglob("*"))
 
-            plan = migrator.make_plan(root, None)
+            plan = migrator.make_plan(root)
 
             after = sorted(str(path.relative_to(root)) for path in root.rglob("*"))
-            self.assertEqual("blocked", plan["status"])
-            self.assertTrue(any("missing exact scope mapping" in item for item in plan["blockers"]))
+            self.assertEqual("ready", plan["status"], plan["blockers"])
             self.assertEqual(before, after)
 
     def test_migration_check_ignores_non_legacy_recurrence(self) -> None:
@@ -402,30 +354,10 @@ class ValidateEntriesTest(unittest.TestCase):
                 "| 2026-09-01 | human-confirmation | global | feedback | 已有知识复现不属于本次经验迁移 |\n",
             )
 
-            plan = migrator.make_plan(root, None)
+            plan = migrator.make_plan(root)
 
             self.assertEqual("ready", plan["status"], plan["blockers"])
             self.assertEqual(0, plan["counts"]["legacy_recurrences"])
-
-    def test_repo_identity_is_shared_by_git_worktrees(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            base = Path(temp)
-            repository = base / "repository"
-            worktree = base / "worktree"
-            subprocess.run(["git", "init", str(repository)], check=True, capture_output=True)
-            subprocess.run(["git", "-C", str(repository), "config", "user.name", "Memory Test"], check=True)
-            subprocess.run(["git", "-C", str(repository), "config", "user.email", "memory@example.invalid"], check=True)
-            self.write_bytes(repository / "README.md", "test\n")
-            subprocess.run(["git", "-C", str(repository), "add", "README.md"], check=True)
-            subprocess.run(["git", "-C", str(repository), "commit", "-m", "init"], check=True, capture_output=True)
-            subprocess.run(["git", "-C", str(repository), "worktree", "add", "-b", "memory-test", str(worktree)], check=True, capture_output=True)
-
-            primary = migrator.resolve_repository(repository)
-            secondary = migrator.resolve_repository(worktree)
-
-            self.assertEqual(primary["project_key"], secondary["project_key"])
-            self.assertEqual(primary["git_common_dir"], secondary["git_common_dir"])
-
 
 if __name__ == "__main__":
     unittest.main()

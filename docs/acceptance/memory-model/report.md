@@ -2,16 +2,17 @@
 
 ## 结论
 
-源码、fixture 与当前本机真实迁移验收全绿：memory 已成为 experience 的超集，保留 `lesson` 学习；global 与项目 memory 物理隔离；同仓库 worktree 共享 Git identity，非 Git 工作区使用规范化根目录 identity；索引含 tags 并执行 200 行/25KB 双门禁；legacy 迁移已完成零副作用检查、显式 scope map、正文/复现保留、备份和安装后全根校验。
+源码、fixture 与当前本机真实数据验收全绿。memory 是 experience 的超集并保留 `lesson`，但不再按项目拆分：所有记忆只进入 `memory/current` 或 `memory/archive`，scope 只作业务标签。项目识别、Git/非 Git 判断、project key、roots、`scope.json` 和 25KB byte 门禁均已从当前设计删除。
 
 ## 证据
 
-- 15 个 unittest 全部通过。
+- 14 个当前 unittest 全部通过。
 - 3 个 Python 文件 AST 解析通过。
-- 当前真实数据 `--check` 扫描并计划 59 条 experience，形成 3 个项目桶、识别 1 个旧复现，0 blocker；预检前后根目录清单未变化。
-- `--apply` 成功后独立 root 校验得到 88 个条目、0 failure；59 条迁移正文和关键字段逐条比较 0 mismatch，1 个旧复现转换一致且既有 knowledge 复现保留。
-- 三个项目 `MEMORY.md` 均低于 200 行/25KB；旧 `experience/` 已移动到带 UTC 时间戳的 legacy 备份，staging 残留为 0。
-- 用户随后明确授权更新本地数据根 README；旧 experience 契约词零命中，当前 knowledge/memory 结构、五类 memory、项目 identity、导航和正文门禁均已写入。文件为 UTF-8 无 BOM、无尾随空白，更新后 root 校验仍为 88 个条目、0 failure。
+- legacy experience 迁移现在无需 scope map；非 global scope 原样进入统一 memory，正文、来源、日期、归档状态和复现仍保持。
+- 本机项目桶迁移 `-Check` 得到 59 条源 memory、0 重复 id、0 blocker；`-Apply` 后独立 root 校验得到 88 个条目、0 failure。
+- 旧备份与新目录逐条比较为 59/59、0 mismatch；新目录只含 current/archive，`scope: repo:` 和 staging 残留均为 0。
+- 统一 `MEMORY.md` 为 63 行、25696 bytes，验证只保留 200 行门禁即可承载当前数据，无需项目桶或 25KB 门禁。
+- 本地数据根 README 与两个 Skill 都只声明统一 memory 目录及标签式 scope。
 
 ## 边界
 

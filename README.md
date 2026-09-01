@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | `distill-self-improving` | 将用户明确指定的文件、目录或项目建立索引并逐份蒸馏 | “把这个项目加入知识库”“整理这批文档” |
 | `evolve-self-improving` | 自动维护 user、feedback、project、reference、lesson 五类跨会话记忆与稳定知识 | “记住这条规则”“把已确认根因沉淀下来” |
-| `use-self-improving` | 从 global 与当前仓库的精简 `MEMORY.md` 召回相关记忆，再按需读取主题文件 | “处理这个任务”“之前为什么这么做？” |
+| `use-self-improving` | 从统一的精简 `MEMORY.md` 召回相关记忆，再按需读取主题文件 | “处理这个任务”“之前为什么这么做？” |
 
 ## 安装
 
@@ -98,7 +98,7 @@ ClawHub 上的发布副本遵循平台规定的 MIT-0 许可；GitHub 仓库继�
 
 1. `distill-self-improving` 整理用户明确指定的原始资料，但不自动生成知识或记忆条目。
 2. `evolve-self-improving` 只保存跨会话有用、来源可回查、边界清楚且无法从代码或固定指令直接推导的记忆；稳定事实进入 knowledge，已收敛方法、失败模式和护栏进入 `lesson`。
-3. `use-self-improving` 先读 global 与当前 Git 仓库或非 Git 工作区的一行式 `MEMORY.md`，命中后才读取 1–3 个主题文件；易变结论回到原文件、git 或当前现场复核。
+3. `use-self-improving` 先读统一的一行式 `MEMORY.md`，命中后才读取 1–3 个主题文件；易变结论回到原文件、git 或当前现场复核。
 
 ## 数据与安全边界
 
@@ -106,31 +106,21 @@ ClawHub 上的发布副本遵循平台规定的 MIT-0 许可；GitHub 仓库继�
 - 自动发现学习信号不等于自动保存；猜测、临时状态、原始报错和未定位事件不会入库。
 - 查询 Skill 全程只读，不会新增、修改或删除知识库内容，也不记录访问次数。
 - memory 分为 `user`、`feedback`、`project`、`reference`、`lesson`；它是可审计的上下文，不是强制规则，也不会自动下沉为 Skill、项目规则或执行门禁。
-- 全局偏好进入 `memory/global/`；Git 项目按 git common dir 形成独立桶并由同仓库 worktree 共享，非 Git 工作区按规范化绝对根目录形成独立桶，项目之间不交叉扫描。
+- 所有记忆统一进入 `memory/current/` 或 `memory/archive/`；`scope` 保留 workspace、domain、product、runtime 等逻辑隔离，检索时只采用 `global`、当前 scope 或其父级，但不创建项目桶，也不判断 Git、目录或临时工作区。
 - knowledge 与 lesson 可记录后来独立发生的复现证据；其他 memory 不统计复现次数，等价信息只追加来源并更新 `modified_at`。
-- 可从当前代码、git 历史或固定项目指令直接推导的信息不写入 memory；每份 `MEMORY.md` 不超过 200 行或 25KB，主题正文按需读取。
+- 可从当前代码、git 历史或固定项目指令直接推导的信息不写入 memory；`MEMORY.md` 不超过 200 行，主题正文按需读取。
 - 凭据、隐私、客户原文和长篇原文不应写入知识库。
 
 ## 从 experience 迁移
 
-本版本将旧 `experience/{current,archive}` 迁移为 memory 中的 `lesson`，保留正文、来源、日期、复现证据和归档状态。迁移不会猜测旧 scope 对应哪个项目：除 `global` 外，必须用 JSON 显式提供“旧 scope → Git 仓库或非 Git 工作区绝对路径”映射。Git 路径按 common dir 归并 worktree；非 Git 路径按该工作区根目录隔离。
+本版本将旧 `experience/{current,archive}` 迁移为 memory 中的 `lesson`，保留正文、scope、来源、日期、复现证据和归档状态。所有条目进入统一 memory，不需要项目目录映射。
 
 先执行零副作用检查：
 
 ```powershell
 python evolve-self-improving/scripts/migrate_experience.py `
   --root "$env:USERPROFILE\.agent-knowledge" `
-  --check `
-  --scope-map "D:\path\to\scope-map.json"
-```
-
-映射文件示例：
-
-```json
-{
-  "workspace:baibu-agent": "D:/baibu-agent",
-  "workspace:agent-channel-host": "D:/project/agent-channel-host"
-}
+  --check
 ```
 
 只有检查结果为 `ready` 才执行：
@@ -138,8 +128,7 @@ python evolve-self-improving/scripts/migrate_experience.py `
 ```powershell
 python evolve-self-improving/scripts/migrate_experience.py `
   --root "$env:USERPROFILE\.agent-knowledge" `
-  --apply `
-  --scope-map "D:\path\to\scope-map.json"
+  --apply
 ```
 
 成功后，原 `experience/` 与旧 `e-*` 复现文件会移动到 `legacy/experience-<UTC时间>/`，新条目使用 `m-*`、`type: lesson` 和 UTC `modified_at`。迁移结束会自动运行完整 root 校验；任何失败都会恢复迁移前状态。
