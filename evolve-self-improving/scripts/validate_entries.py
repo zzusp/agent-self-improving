@@ -13,12 +13,15 @@ from typing import Any
 
 
 KNOWLEDGE_REQUIRED_FIELDS = ("id", "title", "scope", "tags", "learned_at", "source")
-MEMORY_REQUIRED_FIELDS = KNOWLEDGE_REQUIRED_FIELDS + ("type", "modified_at")
+MEMORY_REQUIRED_FIELDS = KNOWLEDGE_REQUIRED_FIELDS + ("type", "modified_at", "summary")
 OPTIONAL_FIELDS = ("supersedes",)
 MEMORY_TYPES = {"user", "feedback", "project", "reference", "lesson"}
 RECURRENCE_SIGNALS = {"correction", "feature-request", "knowledge-gap", "error"}
 KNOWLEDGE_DIRECTORIES = ("knowledge/current", "knowledge/archive")
 INDEX_MAX_LINES = 200
+INDEX_MAX_BYTES = 25_000
+MEMORY_SUMMARY_MIN_CHARS = 20
+MEMORY_SUMMARY_MAX_CHARS = 120
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
 TIMESTAMP_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\Z")
 FENCE_RE = re.compile(r"(?m)^\s*(```+|~~~+).*$")
@@ -132,7 +135,7 @@ def effective_text(body: str) -> str:
     return "".join(char for char in text if not char.isspace())
 
 
-def first_summary(body: str) -> str:
+def first_overview(body: str) -> str:
     paragraphs: list[str] = []
     current: list[str] = []
     for raw in body.splitlines():
@@ -197,6 +200,19 @@ def load_entry(path: Path, enforce_length: bool = True) -> tuple[Entry | None, l
             failures.append(failure("E_MODIFIED_AT", path, "UTC YYYY-MM-DDTHH:MM:SSZ", metadata.get("modified_at"), "写入可比较的 UTC 修改时点。"))
         if not isinstance(metadata.get("scope"), str) or not str(metadata["scope"]).strip():
             failures.append(failure("E_MEMORY_SCOPE", path, "non-empty scope label", metadata.get("scope"), "写入 global 或业务上下文 scope 标签。"))
+        summary = metadata.get("summary")
+        if not isinstance(summary, str):
+            failures.append(failure("E_MEMORY_SUMMARY", path, "single-line semantic summary", summary, "由 Agent 概括何时应打开这条记忆，不从正文机械抽取。"))
+        elif not MEMORY_SUMMARY_MIN_CHARS <= len(summary.strip()) <= MEMORY_SUMMARY_MAX_CHARS:
+            failures.append(
+                failure(
+                    "E_MEMORY_SUMMARY_LENGTH",
+                    path,
+                    f"{MEMORY_SUMMARY_MIN_CHARS}..{MEMORY_SUMMARY_MAX_CHARS} Unicode code points",
+                    len(summary.strip()),
+                    "由 Agent 重写完整而精简的召回摘要；不得静默截断。",
+                )
+            )
     if not isinstance(metadata.get("tags"), list) or not metadata.get("tags"):
         failures.append(failure("E_TAGS", path, "non-empty inline list", metadata.get("tags"), "写入非空 tags 列表。"))
     source = metadata.get("source")
@@ -215,7 +231,7 @@ def load_entry(path: Path, enforce_length: bool = True) -> tuple[Entry | None, l
     minimum, maximum = (40, 800) if is_memory else (300, 400)
     if enforce_length and not minimum <= len(compact) <= maximum:
         failures.append(failure("E_BODY_LENGTH", path, f"{minimum}..{maximum} Unicode code points", len(compact), "依据原证据扩充或压缩正文，不得机械凑字。"))
-    if not first_summary(body):
+    if not is_memory and not first_overview(body):
         failures.append(failure("E_SUMMARY_EMPTY", path, "content-specific first summary", "", "让正文首个概括表达条目特异内容。"))
     return Entry(path, metadata, body, compact), failures
 
@@ -317,12 +333,8 @@ def render_index(directory: Path, entries: list[Entry], recurrences: dict[str, l
         ordered.sort(key=lambda entry: str(entry.metadata["modified_at"]), reverse=True)
         for entry in ordered:
             meta = entry.metadata
-            recurrence = (recurrences or {}).get(str(meta["id"]), [])
-            recurrence_text = f" | recurrence:{recurrence_label(recurrence)}" if recurrence else ""
             lines.append(
-                f"- [{cell(meta['id'])}](./{entry.path.name}) | {cell(meta['type'])} | {cell(meta['scope'])} | "
-                f"{cell(meta['modified_at'])} | tags:{cell(meta['tags'])} | {cell(meta['title'])} | "
-                f"{cell(first_summary(entry.body))}{recurrence_text}"
+                f"- [{cell(meta['title'])}](./{entry.path.name}) | {cell(meta['scope'])} | {cell(meta['summary'])}"
             )
         return "\n".join(lines) + "\n"
     kind = "知识" if "knowledge" in directory.parts else "记忆"
@@ -340,6 +352,7 @@ def render_index(directory: Path, entries: list[Entry], recurrences: dict[str, l
     for entry in ordered:
         meta = entry.metadata
         link = f"[{cell(meta['id'])}](./{entry.path.name})"
+        overview = meta["summary"] if memory_location(entry.path) is not None else first_overview(entry.body)
         lines.append(
             "| " + " | ".join(
                 (
@@ -350,7 +363,7 @@ def render_index(directory: Path, entries: list[Entry], recurrences: dict[str, l
                     cell(meta["learned_at"]),
                     cell(display_source(meta["source"])),
                     cell(recurrence_label((recurrences or {}).get(str(meta["id"]), []))),
-                    cell(first_summary(entry.body)),
+                    cell(overview),
                 )
             ) + " |"
         )
@@ -364,6 +377,9 @@ def index_limit_failures(path: Path, text: str) -> list[Failure]:
     line_count = len(text.splitlines())
     if line_count > INDEX_MAX_LINES:
         failures.append(failure("E_MEMORY_INDEX_LINES", path, f"<= {INDEX_MAX_LINES}", line_count, "合并或归档低价值记忆后重建索引。"))
+    byte_count = len(text.encode("utf-8"))
+    if byte_count > INDEX_MAX_BYTES:
+        failures.append(failure("E_MEMORY_INDEX_BYTES", path, f"<= {INDEX_MAX_BYTES} UTF-8 bytes", byte_count, "精简摘要，或合并、归档低价值记忆后重建索引。"))
     return failures
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""把 legacy experience 迁移到统一 memory；默认 --check 零副作用。"""
+"""把已补齐语义 summary 的 legacy experience 迁移到统一 memory；默认 --check 零副作用。"""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def load_legacy(path: Path) -> tuple[dict[str, Any] | None, str, list[str]]:
     errors = [item.code for item in failures + parse_failures]
     if metadata is None:
         return None, body, errors
-    required = set(validator.KNOWLEDGE_REQUIRED_FIELDS)
+    required = set(validator.KNOWLEDGE_REQUIRED_FIELDS) | {"summary"}
     allowed = required | set(validator.OPTIONAL_FIELDS)
     if not required.issubset(metadata) or not set(metadata).issubset(allowed):
         errors.append("E_LEGACY_FIELDS")
@@ -39,6 +39,9 @@ def load_legacy(path: Path) -> tuple[dict[str, Any] | None, str, list[str]]:
         errors.append("E_LEGACY_DATE")
     if not isinstance(metadata.get("tags"), list) or not metadata.get("tags"):
         errors.append("E_LEGACY_TAGS")
+    summary = metadata.get("summary")
+    if not isinstance(summary, str) or not validator.MEMORY_SUMMARY_MIN_CHARS <= len(summary.strip()) <= validator.MEMORY_SUMMARY_MAX_CHARS:
+        errors.append("E_LEGACY_SUMMARY")
     source = metadata.get("source")
     source_values = source if isinstance(source, list) else [source]
     if not source_values or any(not isinstance(value, str) or not value.strip() for value in source_values):
@@ -159,6 +162,7 @@ def migrated_metadata(metadata: dict[str, Any], item: dict[str, Any]) -> dict[st
         "source": metadata["source"],
         "type": "lesson",
         "modified_at": f"{metadata['learned_at']}T00:00:00Z",
+        "summary": metadata["summary"],
     }
     if "supersedes" in metadata:
         supersedes = str(metadata["supersedes"])
