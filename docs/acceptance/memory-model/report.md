@@ -11,10 +11,10 @@
 - 当前真实数据 `--check` 扫描并计划 59 条 experience，形成 3 个项目桶、识别 1 个旧复现，0 blocker；预检前后根目录清单未变化。
 - `--apply` 成功后独立 root 校验得到 88 个条目、0 failure；59 条迁移正文和关键字段逐条比较 0 mismatch，1 个旧复现转换一致且既有 knowledge 复现保留。
 - 三个项目 `MEMORY.md` 均低于 200 行/25KB；旧 `experience/` 已移动到带 UTC 时间戳的 legacy 备份，staging 残留为 0。
+- 用户随后明确授权更新本地数据根 README；旧 experience 契约词零命中，当前 knowledge/memory 结构、五类 memory、项目 identity、导航和正文门禁均已写入。文件为 UTF-8 无 BOM、无尾随空白，更新后 root 校验仍为 88 个条目、0 failure。
 
 ## 边界
 
 - 未发布新 Skill 版本，也未验证 skills.sh、SkillHub 或 ClawHub 安装后的运行态。
-- 本地数据根既有 `README.md` 仍是旧契约文本；迁移器未在缺少模板版本标识时覆盖用户文档，仓库 README 与 Skill 契约已更新。
 
 因此本报告证明当前本机数据迁移闭环与源码行为，不声称已完成 Skill 市场发布或其他运行环境部署。
