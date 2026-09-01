@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""只读校验 knowledge/experience 条目，并确定性渲染目录 INDEX.md。"""
+"""只读校验 knowledge/memory 条目、仓库作用域和确定性导航。"""
 
 from __future__ import annotations
 
@@ -12,16 +12,17 @@ from pathlib import Path
 from typing import Any
 
 
-REQUIRED_FIELDS = ("id", "title", "scope", "tags", "learned_at", "source")
+KNOWLEDGE_REQUIRED_FIELDS = ("id", "title", "scope", "tags", "learned_at", "source")
+MEMORY_REQUIRED_FIELDS = KNOWLEDGE_REQUIRED_FIELDS + ("type", "modified_at")
 OPTIONAL_FIELDS = ("supersedes",)
+MEMORY_TYPES = {"user", "feedback", "project", "reference", "lesson"}
 RECURRENCE_SIGNALS = {"correction", "feature-request", "knowledge-gap", "error"}
-TARGET_DIRECTORIES = (
-    "knowledge/current",
-    "knowledge/archive",
-    "experience/current",
-    "experience/archive",
-)
+KNOWLEDGE_DIRECTORIES = ("knowledge/current", "knowledge/archive")
+INDEX_MAX_LINES = 200
+INDEX_MAX_BYTES = 25 * 1024
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
+TIMESTAMP_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\Z")
+PROJECT_KEY_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,62}-[0-9a-f]{12}\Z")
 FENCE_RE = re.compile(r"(?m)^\s*(```+|~~~+).*$")
 LINK_RE = re.compile(r"!?\[([^\]]*)\]\([^)]*\)")
 LINE_PREFIX_RE = re.compile(r"(?m)^\s{0,3}(?:#{1,6}\s+|>\s*|[-+*]\s+|\d+[.)]\s+)")
@@ -50,6 +51,13 @@ class Entry:
     metadata: dict[str, Any]
     body: str
     effective_text: str
+
+
+@dataclass(frozen=True)
+class DirectorySpec:
+    relative: str
+    path: Path
+    index_name: str
 
 
 def failure(code: str, path: Path, expected: Any, actual: Any, remediation: str) -> Failure:
@@ -145,6 +153,20 @@ def first_summary(body: str) -> str:
     return summary[:88]
 
 
+def memory_location(path: Path) -> tuple[str, str | None] | None:
+    parts = path.parts
+    try:
+        index = parts.index("memory")
+    except ValueError:
+        return None
+    suffix = parts[index + 1 :]
+    if len(suffix) >= 2 and suffix[0] == "global":
+        return "global", None
+    if len(suffix) >= 3 and suffix[0] == "projects":
+        return "project", suffix[1]
+    return "invalid", None
+
+
 def load_entry(path: Path, enforce_length: bool = True) -> tuple[Entry | None, list[Failure]]:
     text, failures = strict_text(path)
     if text is None:
@@ -153,20 +175,37 @@ def load_entry(path: Path, enforce_length: bool = True) -> tuple[Entry | None, l
     failures.extend(parse_failures)
     if metadata is None:
         return None, failures
-    allowed = set(REQUIRED_FIELDS + OPTIONAL_FIELDS)
+    location = memory_location(path)
+    is_memory = location is not None
+    required_fields = MEMORY_REQUIRED_FIELDS if is_memory else KNOWLEDGE_REQUIRED_FIELDS
+    allowed = set(required_fields + OPTIONAL_FIELDS)
     actual_fields = set(metadata)
-    if not set(REQUIRED_FIELDS).issubset(actual_fields) or not actual_fields.issubset(allowed):
-        failures.append(failure("E_FIELDS", path, {"required": REQUIRED_FIELDS, "optional": OPTIONAL_FIELDS}, sorted(actual_fields), "只保留六个必填字段及可选 supersedes。"))
-        if not set(REQUIRED_FIELDS).issubset(actual_fields):
+    if not set(required_fields).issubset(actual_fields) or not actual_fields.issubset(allowed):
+        failures.append(failure("E_FIELDS", path, {"required": required_fields, "optional": OPTIONAL_FIELDS}, sorted(actual_fields), "只保留该认知类型的必填字段及可选 supersedes。"))
+        if not set(required_fields).issubset(actual_fields):
             return None, failures
     entry_id = metadata.get("id")
     if entry_id != path.stem:
         failures.append(failure("E_ID_FILENAME", path, path.stem, entry_id, "让 id 与文件名一致。"))
-    expected_prefix = "k-" if "knowledge" in path.parts else "e-" if "experience" in path.parts else None
-    if expected_prefix and (not isinstance(entry_id, str) or not entry_id.startswith(expected_prefix)):
+    expected_prefix = "m-" if is_memory else "k-"
+    if not isinstance(entry_id, str) or not entry_id.startswith(expected_prefix):
         failures.append(failure("E_ID_PREFIX", path, expected_prefix, entry_id, "按认知类型修正 id 前缀。"))
     if not DATE_RE.fullmatch(str(metadata.get("learned_at", ""))):
         failures.append(failure("E_DATE", path, "YYYY-MM-DD", metadata.get("learned_at"), "修正 learned_at。"))
+    if is_memory:
+        if location and location[0] == "invalid":
+            failures.append(failure("E_MEMORY_LOCATION", path, "memory/global or memory/projects/<key>", str(path.parent), "移动到合法记忆作用域。"))
+        if metadata.get("type") not in MEMORY_TYPES:
+            failures.append(failure("E_MEMORY_TYPE", path, sorted(MEMORY_TYPES), metadata.get("type"), "使用五类记忆 type 之一。"))
+        if not TIMESTAMP_RE.fullmatch(str(metadata.get("modified_at", ""))):
+            failures.append(failure("E_MODIFIED_AT", path, "UTC YYYY-MM-DDTHH:MM:SSZ", metadata.get("modified_at"), "写入可比较的 UTC 修改时点。"))
+        scope = str(metadata.get("scope", ""))
+        if location and location[0] == "global" and scope != "global":
+            failures.append(failure("E_MEMORY_SCOPE", path, "global", scope, "全局记忆必须使用 global scope。"))
+        if location and location[0] == "project":
+            project_key = location[1] or ""
+            if not scope.startswith(f"repo:{project_key}"):
+                failures.append(failure("E_MEMORY_SCOPE", path, f"repo:{project_key}", scope, "让项目记忆 scope 与物理仓库桶一致。"))
     if not isinstance(metadata.get("tags"), list) or not metadata.get("tags"):
         failures.append(failure("E_TAGS", path, "non-empty inline list", metadata.get("tags"), "写入非空 tags 列表。"))
     source = metadata.get("source")
@@ -182,10 +221,10 @@ def load_entry(path: Path, enforce_length: bool = True) -> tuple[Entry | None, l
             elif value != "human-confirmation" and not value.startswith(("conversation:", "command:")):
                 failures.append(failure("E_SOURCE_KIND", path, "file:/conversation:/command:/human-confirmation", value, "使用受支持且可追溯的 source。"))
     compact = effective_text(body)
-    if enforce_length and not 300 <= len(compact) <= 400:
-        failures.append(failure("E_BODY_LENGTH", path, "300..400 Unicode code points", len(compact), "依据原证据扩充或压缩正文，不得机械凑字。"))
-    summary = first_summary(body)
-    if not summary:
+    minimum, maximum = (40, 800) if is_memory else (300, 400)
+    if enforce_length and not minimum <= len(compact) <= maximum:
+        failures.append(failure("E_BODY_LENGTH", path, f"{minimum}..{maximum} Unicode code points", len(compact), "依据原证据扩充或压缩正文，不得机械凑字。"))
+    if not first_summary(body):
         failures.append(failure("E_SUMMARY_EMPTY", path, "content-specific first summary", "", "让正文首个概括表达条目特异内容。"))
     return Entry(path, metadata, body, compact), failures
 
@@ -200,14 +239,12 @@ def display_source(value: Any) -> str:
             parts = [part for part in normalized.split("/") if part]
             suffix = parts[-3:] if len(parts) >= 3 and parts[-2:] == [".git", "config"] else parts[-2:]
             shown.append("file:" + "/".join(suffix))
-        elif text.startswith("command:"):
-            shown.append(text[:56])
         else:
             shown.append(text[:56])
     return "<br>".join(shown)
 
 
-def load_recurrences(root: Path, known_ids: set[str]) -> tuple[dict[str, list[dict[str, str]]], list[Failure]]:
+def load_recurrences(root: Path, allowed_ids: set[str]) -> tuple[dict[str, list[dict[str, str]]], list[Failure]]:
     directory = root / "recurrence"
     if not directory.exists():
         return {}, []
@@ -223,8 +260,8 @@ def load_recurrences(root: Path, known_ids: set[str]) -> tuple[dict[str, list[di
         if text is None:
             continue
         entry_id = path.stem
-        if entry_id not in known_ids:
-            failures.append(failure("E_RECURRENCE_ORPHAN", path, "existing knowledge/experience id", entry_id, "删除孤儿记录或恢复对应条目。"))
+        if entry_id not in allowed_ids:
+            failures.append(failure("E_RECURRENCE_ORPHAN", path, "knowledge or lesson memory id", entry_id, "迁移、删除孤儿记录或恢复对应条目。"))
         lines = text.splitlines()
         if len(lines) < 5 or lines[0] != f"# {entry_id} 复现记录" or lines[2] != expected_header or lines[3] != expected_rule:
             failures.append(failure("E_RECURRENCE_FORMAT", path, "title + fixed five-column table", lines[:4], "按 Skill 的复现表格格式修正。"))
@@ -248,7 +285,7 @@ def load_recurrences(root: Path, known_ids: set[str]) -> tuple[dict[str, list[di
                 if not source_path.is_absolute() or not source_path.is_file():
                     failures.append(failure("E_RECURRENCE_SOURCE_PATH", path, "existing absolute file source", source, "回查并修正复现来源；不要猜路径。"))
             elif not source.startswith(("conversation:", "command:")) and source != "human-confirmation":
-                failures.append(failure("E_RECURRENCE_SOURCE_KIND", path, "traceable source", source, "使用 file:/conversation:/command:/human-confirmation 来源。"))
+                failures.append(failure("E_RECURRENCE_SOURCE_KIND", path, "traceable source", source, "使用受支持来源。"))
             seen_sources.add(source)
             if not scope or not summary:
                 failures.append(failure("E_RECURRENCE_CONTENT", path, "non-empty scope and summary", cells, "补齐适用范围和特异概括。"))
@@ -273,8 +310,31 @@ def recurrence_label(records: list[dict[str, str]]) -> str:
     return f"{len(records)}（最近 {max(item['observed_at'] for item in records)}）"
 
 
+def is_current_memory_directory(directory: Path) -> bool:
+    return directory.name == "current" and memory_location(directory / "placeholder.md") is not None
+
+
 def render_index(directory: Path, entries: list[Entry], recurrences: dict[str, list[dict[str, str]]] | None = None) -> str:
-    kind = "知识" if "knowledge" in directory.parts else "经验"
+    if is_current_memory_directory(directory):
+        lines = [
+            "# Memory",
+            "",
+            "当前作用域的精简召回入口；每条一行，命中后再打开主题文件并按来源复核。",
+            "",
+        ]
+        ordered = sorted(entries, key=lambda entry: str(entry.metadata["id"]))
+        ordered.sort(key=lambda entry: str(entry.metadata["modified_at"]), reverse=True)
+        for entry in ordered:
+            meta = entry.metadata
+            recurrence = (recurrences or {}).get(str(meta["id"]), [])
+            recurrence_text = f" | recurrence:{recurrence_label(recurrence)}" if recurrence else ""
+            lines.append(
+                f"- [{cell(meta['id'])}](./{entry.path.name}) | {cell(meta['type'])} | {cell(meta['scope'])} | "
+                f"{cell(meta['modified_at'])} | tags:{cell(meta['tags'])} | {cell(meta['title'])} | "
+                f"{cell(first_summary(entry.body))}{recurrence_text}"
+            )
+        return "\n".join(lines) + "\n"
+    kind = "知识" if "knowledge" in directory.parts else "记忆"
     state = "当前" if directory.name == "current" else "归档"
     lines = [
         f"# {state}{kind}导航",
@@ -284,8 +344,8 @@ def render_index(directory: Path, entries: list[Entry], recurrences: dict[str, l
         "| 条目 | title | scope | tags | learned_at | source | 复现 | 特异概括 |",
         "|---|---|---|---|---|---|---|---|",
     ]
-    ordered = sorted(entries, key=lambda entry: entry.metadata["id"])
-    ordered.sort(key=lambda entry: entry.metadata["learned_at"], reverse=True)
+    ordered = sorted(entries, key=lambda entry: str(entry.metadata["id"]))
+    ordered.sort(key=lambda entry: str(entry.metadata["learned_at"]), reverse=True)
     for entry in ordered:
         meta = entry.metadata
         link = f"[{cell(meta['id'])}](./{entry.path.name})"
@@ -306,17 +366,86 @@ def render_index(directory: Path, entries: list[Entry], recurrences: dict[str, l
     return "\n".join(lines) + "\n"
 
 
+def index_limit_failures(path: Path, text: str) -> list[Failure]:
+    if path.name != "MEMORY.md":
+        return []
+    failures: list[Failure] = []
+    line_count = len(text.splitlines())
+    byte_count = len(text.encode("utf-8"))
+    if line_count > INDEX_MAX_LINES:
+        failures.append(failure("E_MEMORY_INDEX_LINES", path, f"<= {INDEX_MAX_LINES}", line_count, "合并或归档低价值记忆后重建索引。"))
+    if byte_count > INDEX_MAX_BYTES:
+        failures.append(failure("E_MEMORY_INDEX_BYTES", path, f"<= {INDEX_MAX_BYTES}", byte_count, "缩短索引概括、合并或归档记忆后重建。"))
+    return failures
+
+
 def read_directory(directory: Path) -> tuple[list[Entry], list[Failure]]:
     entries: list[Entry] = []
     failures: list[Failure] = []
     for path in sorted(directory.glob("*.md")):
-        if path.name == "INDEX.md":
+        if path.name in {"INDEX.md", "MEMORY.md"}:
             continue
         entry, item_failures = load_entry(path)
         failures.extend(item_failures)
         if entry:
             entries.append(entry)
     return entries, failures
+
+
+def load_project_scope(project_directory: Path) -> list[Failure]:
+    path = project_directory / "scope.json"
+    try:
+        raw = path.read_text(encoding="utf-8")
+        data = json.loads(raw)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return [failure("E_PROJECT_SCOPE_FILE", path, "readable UTF-8 JSON", str(exc), "重建仓库作用域清单。")]
+    if not isinstance(data, dict):
+        return [failure("E_PROJECT_SCOPE_FIELDS", path, "JSON object", type(data).__name__, "重建固定字段的作用域对象。")]
+    failures: list[Failure] = []
+    key = project_directory.name
+    expected_fields = {"project_key", "git_common_dir", "roots"}
+    if set(data) != expected_fields:
+        failures.append(failure("E_PROJECT_SCOPE_FIELDS", path, sorted(expected_fields), sorted(data), "只保留固定作用域字段。"))
+    if data.get("project_key") != key or not PROJECT_KEY_RE.fullmatch(key):
+        failures.append(failure("E_PROJECT_KEY", path, key, data.get("project_key"), "使用 slug + 12 位 identity hash。"))
+    if not isinstance(data.get("git_common_dir"), str) or not Path(data.get("git_common_dir", "")).is_absolute():
+        failures.append(failure("E_GIT_COMMON_DIR", path, "absolute normalized path", data.get("git_common_dir"), "记录 git rev-parse 得到的绝对 common dir。"))
+    roots = data.get("roots")
+    if not isinstance(roots, list) or not roots or any(not isinstance(item, str) or not Path(item).is_absolute() for item in roots):
+        failures.append(failure("E_PROJECT_ROOTS", path, "non-empty absolute path list", roots, "记录至少一个仓库根路径别名。"))
+    return failures
+
+
+def discover_directories(root: Path) -> tuple[list[DirectorySpec], list[Failure]]:
+    specs = [
+        DirectorySpec(relative, root / relative, "INDEX.md")
+        for relative in KNOWLEDGE_DIRECTORIES
+    ]
+    specs.extend(
+        (
+            DirectorySpec("memory/global/current", root / "memory/global/current", "MEMORY.md"),
+            DirectorySpec("memory/global/archive", root / "memory/global/archive", "INDEX.md"),
+        )
+    )
+    failures: list[Failure] = []
+    projects = root / "memory/projects"
+    if not projects.is_dir():
+        failures.append(failure("E_DIRECTORY", projects, "existing directory", "missing", "初始化 memory/projects。"))
+        return specs, failures
+    for project in sorted(path for path in projects.iterdir() if path.is_dir()):
+        is_junction = getattr(project, "is_junction", lambda: False)
+        if project.is_symlink() or is_junction():
+            failures.append(failure("E_PROJECT_LINK", project, "real directory", "link or junction", "移除重解析入口并使用真实目录。"))
+            continue
+        failures.extend(load_project_scope(project))
+        relative = f"memory/projects/{project.name}"
+        specs.extend(
+            (
+                DirectorySpec(f"{relative}/current", project / "current", "MEMORY.md"),
+                DirectorySpec(f"{relative}/archive", project / "archive", "INDEX.md"),
+            )
+        )
+    return specs, failures
 
 
 def report(mode: str, entries: list[Entry], failures: list[Failure]) -> dict[str, Any]:
@@ -335,30 +464,37 @@ def report(mode: str, entries: list[Entry], failures: list[Failure]) -> dict[str
 
 
 def command_check_root(root: Path) -> tuple[dict[str, Any], int]:
+    specs, failures = discover_directories(root)
+    legacy = root / "experience"
+    if legacy.exists():
+        failures.append(failure("E_LEGACY_EXPERIENCE", legacy, "migrated or absent", "present", "先运行 migrate_experience.py --check，完成迁移后再校验。"))
     entries: list[Entry] = []
-    failures: list[Failure] = []
     per_directory: dict[str, int] = {}
-    for relative in TARGET_DIRECTORIES:
-        directory = root / relative
-        if not directory.is_dir():
-            failures.append(failure("E_DIRECTORY", directory, "existing directory", "missing", "补齐认知目录。"))
+    for spec in specs:
+        if not spec.path.is_dir():
+            failures.append(failure("E_DIRECTORY", spec.path, "existing directory", "missing", "补齐认知目录。"))
             continue
-        found, item_failures = read_directory(directory)
+        found, item_failures = read_directory(spec.path)
         entries.extend(found)
         failures.extend(item_failures)
-        per_directory[relative] = len(found)
-    recurrences, recurrence_failures = load_recurrences(root, {str(entry.metadata["id"]) for entry in entries})
+        per_directory[spec.relative] = len(found)
+    allowed_recurrence_ids = {
+        str(entry.metadata["id"])
+        for entry in entries
+        if "knowledge" in entry.path.parts or entry.metadata.get("type") == "lesson"
+    }
+    recurrences, recurrence_failures = load_recurrences(root, allowed_recurrence_ids)
     failures.extend(recurrence_failures)
-    for relative in TARGET_DIRECTORIES:
-        directory = root / relative
-        if not directory.is_dir():
+    for spec in specs:
+        if not spec.path.is_dir():
             continue
-        directory_entries = [entry for entry in entries if entry.path.parent == directory]
-        index_path = directory / "INDEX.md"
+        directory_entries = [entry for entry in entries if entry.path.parent == spec.path]
+        index_path = spec.path / spec.index_name
         actual, index_failures = strict_text(index_path)
         failures.extend(index_failures)
         if actual is not None:
-            expected = render_index(directory, directory_entries, recurrences)
+            expected = render_index(spec.path, directory_entries, recurrences)
+            failures.extend(index_limit_failures(index_path, actual))
             if actual != expected:
                 failures.append(failure("E_INDEX_MISMATCH", index_path, expected, actual, "用 render-index 原子重建并读回该目录索引。"))
     result = report("root", entries, failures)
@@ -370,8 +506,7 @@ def command_check_root(root: Path) -> tuple[dict[str, Any], int]:
 
 def command_check_file(path: Path) -> tuple[dict[str, Any], int]:
     entry, failures = load_entry(path)
-    entries = [entry] if entry else []
-    result = report("file", entries, failures)
+    result = report("file", [entry] if entry else [], failures)
     return result, 0 if not failures else 1
 
 
@@ -392,27 +527,31 @@ def main() -> int:
     configure_utf8()
     args = build_parser().parse_args()
     if args.command == "render-index":
-        entries: list[Entry] = []
-        failures: list[Failure] = []
-        for path in sorted(args.directory.glob("*.md")):
-            if path.name == "INDEX.md":
-                continue
-            entry, item_failures = load_entry(path)
-            failures.extend(item_failures)
-            if entry:
-                entries.append(entry)
-        root = args.directory.parent.parent
-        known_ids: set[str] = set()
-        for relative in TARGET_DIRECTORIES:
-            for path in (root / relative).glob("*.md"):
-                if path.name != "INDEX.md":
-                    known_ids.add(path.stem)
-        recurrences, recurrence_failures = load_recurrences(root, known_ids)
+        entries, failures = read_directory(args.directory)
+        root = args.directory
+        while root.parent != root and not (root / "knowledge").exists():
+            root = root.parent
+        specs, discovery_failures = discover_directories(root)
+        failures.extend(discovery_failures)
+        all_entries: list[Entry] = []
+        for spec in specs:
+            if spec.path.is_dir():
+                found, _ = read_directory(spec.path)
+                all_entries.extend(found)
+        allowed_ids = {
+            str(entry.metadata["id"])
+            for entry in all_entries
+            if "knowledge" in entry.path.parts or entry.metadata.get("type") == "lesson"
+        }
+        recurrences, recurrence_failures = load_recurrences(root, allowed_ids)
         failures.extend(recurrence_failures)
+        rendered = render_index(args.directory, entries, recurrences)
+        index_name = "MEMORY.md" if is_current_memory_directory(args.directory) else "INDEX.md"
+        failures.extend(index_limit_failures(args.directory / index_name, rendered))
         if failures:
             print(json.dumps(report("render-index", entries, failures), ensure_ascii=False, indent=2), file=sys.stderr)
             return 1
-        sys.stdout.write(render_index(args.directory, entries, recurrences))
+        sys.stdout.write(rendered)
         return 0
     result, code = command_check_root(args.root) if args.root else command_check_file(args.file)
     if args.json:

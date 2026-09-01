@@ -2,15 +2,15 @@
 
 [![skills.sh](https://skills.sh/b/zzusp/agent-self-improving)](https://skills.sh/zzusp/agent-self-improving)
 
-一组面向本机知识与经验闭环的 Agent Skills。三个 Skill 分别负责整理资料、维护可复用认知和只读调用历史信息；知识数据默认保存在 `~/.agent-knowledge/`，与 Skill 代码分离。
+一组面向本机知识与记忆闭环的 Agent Skills。三个 Skill 分别负责整理资料、维护可复用认知和只读调用历史信息；数据默认保存在 `~/.agent-knowledge/`，与 Skill 代码分离。
 
 ## 包含的 Skills
 
 | Skill | 用途 | 典型触发 |
 | --- | --- | --- |
 | `distill-self-improving` | 将用户明确指定的文件、目录或项目建立索引并逐份蒸馏 | “把这个项目加入知识库”“整理这批文档” |
-| `evolve-self-improving` | 从纠正、能力期望、知识缺口和已收敛错误中维护长期知识、经验及有证据的复现记录 | “记住这条规则”“把这次踩坑沉淀下来” |
-| `use-self-improving` | 明确任务开始前按对象、目标和关键问题轻查相似经验；工作受历史信息影响或外部工具执行操作前也会只读检索 | “处理这个任务”“类似故障怎么处理？”“通过外部工具发送或发布” |
+| `evolve-self-improving` | 自动维护 user、feedback、project、reference、lesson 五类跨会话记忆与稳定知识 | “记住这条规则”“把已确认根因沉淀下来” |
+| `use-self-improving` | 从 global 与当前仓库的精简 `MEMORY.md` 召回相关记忆，再按需读取主题文件 | “处理这个任务”“之前为什么这么做？” |
 
 ## 安装
 
@@ -96,18 +96,53 @@ ClawHub 上的发布副本遵循平台规定的 MIT-0 许可；GitHub 仓库继�
 
 三个 Skill 的协作关系是：
 
-1. `distill-self-improving` 整理用户明确指定的原始资料，但不自动生成知识或经验条目。
-2. `evolve-self-improving` 只保存已经验证、跨会话仍有价值且边界清楚的知识与经验。
-3. `use-self-improving` 只读检索；明确任务开始前按任务对象或领域、目标或动作、关键问题轻查相似经验；外部工具执行发送、发布、修改、删除、部署、授权、审批等操作前，或结果异常、准备重试时，再按工具、动作和关键对象轻查，没有候选即停止；结论易变时回到原文件或当前现场复核。
+1. `distill-self-improving` 整理用户明确指定的原始资料，但不自动生成知识或记忆条目。
+2. `evolve-self-improving` 只保存跨会话有用、来源可回查、边界清楚且无法从代码或固定指令直接推导的记忆；稳定事实进入 knowledge，已收敛方法、失败模式和护栏进入 `lesson`。
+3. `use-self-improving` 先读 global 与当前仓库的一行式 `MEMORY.md`，命中后才读取 1–3 个主题文件；易变结论回到原文件、git 或当前现场复核。
 
 ## 数据与安全边界
 
-- 原始文件保持不变；蒸馏产物、知识和经验写入本机 `~/.agent-knowledge/`。
+- 原始文件保持不变；蒸馏产物、知识和记忆写入本机 `~/.agent-knowledge/`。
 - 自动发现学习信号不等于自动保存；猜测、临时状态、原始报错和未定位事件不会入库。
 - 查询 Skill 全程只读，不会新增、修改或删除知识库内容，也不记录访问次数。
-- 复现次数只统计同类模式后来被新独立事件再次证实的记录，不统计读取、引用、命令重试或连续错误；复现时分析再次发生的原因，有证据才修正原经验的适用边界、失败边界、回查方法或结论。
-- 经验是 Agent 结合当前现场自主判断的参考；复现不会生成防复发契约，也不会自动下沉为 Skill、项目规则或执行门禁。
+- memory 分为 `user`、`feedback`、`project`、`reference`、`lesson`；它是可审计的上下文，不是强制规则，也不会自动下沉为 Skill、项目规则或执行门禁。
+- 全局偏好进入 `memory/global/`；项目记忆按 git common dir 形成独立仓库桶，同仓库 worktree 共享，项目之间不交叉扫描。
+- knowledge 与 lesson 可记录后来独立发生的复现证据；其他 memory 不统计复现次数，等价信息只追加来源并更新 `modified_at`。
+- 可从当前代码、git 历史或固定项目指令直接推导的信息不写入 memory；每份 `MEMORY.md` 不超过 200 行或 25KB，主题正文按需读取。
 - 凭据、隐私、客户原文和长篇原文不应写入知识库。
+
+## 从 experience 迁移
+
+本版本将旧 `experience/{current,archive}` 迁移为 memory 中的 `lesson`，保留正文、来源、日期、复现证据和归档状态。迁移不会猜测旧 scope 对应哪个仓库：除 `global` 外，必须用 JSON 显式提供“旧 scope → 仓库绝对路径”映射。
+
+先执行零副作用检查：
+
+```powershell
+python evolve-self-improving/scripts/migrate_experience.py `
+  --root "$env:USERPROFILE\.agent-knowledge" `
+  --check `
+  --scope-map "D:\path\to\scope-map.json"
+```
+
+映射文件示例：
+
+```json
+{
+  "workspace:baibu-agent": "D:/baibu-agent",
+  "workspace:agent-channel-host": "D:/project/agent-channel-host"
+}
+```
+
+只有检查结果为 `ready` 才执行：
+
+```powershell
+python evolve-self-improving/scripts/migrate_experience.py `
+  --root "$env:USERPROFILE\.agent-knowledge" `
+  --apply `
+  --scope-map "D:\path\to\scope-map.json"
+```
+
+成功后，原 `experience/` 与旧 `e-*` 复现文件会移动到 `legacy/experience-<UTC时间>/`，新条目使用 `m-*`、`type: lesson` 和 UTC `modified_at`。迁移结束会自动运行完整 root 校验；任何失败都会恢复迁移前状态。
 
 ## 更新与卸载
 

@@ -1,0 +1,10 @@
+case_id,scenario,round-1,status
+MM-01,五类 memory schema 与物理 scope 校验,PASS,PASS
+MM-02,MEMORY tags 召回字段与 200 行/25KB 门禁,PASS,PASS
+MM-03,global 与 project bucket 完整 root 双射,PASS,PASS
+MM-04,git worktree 共享 repository identity,PASS,PASS
+MM-05,legacy experience 显式拒绝与 check 零写入,PASS,PASS
+MM-06,global/project experience 到 lesson 的正文和复现迁移,PASS,PASS
+MM-07,staging 或安装后校验失败时恢复旧状态,PASS,PASS
+MM-08,CLI render-index 与 check --root 行为,PASS,PASS
+MM-09,当前本机旧数据只读预检与 scope blocker 汇总,PASS,PASS
