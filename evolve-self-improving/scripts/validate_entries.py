@@ -244,7 +244,7 @@ def display_source(value: Any) -> str:
     return "<br>".join(shown)
 
 
-def load_recurrences(root: Path, allowed_ids: set[str]) -> tuple[dict[str, list[dict[str, str]]], list[Failure]]:
+def load_recurrences(root: Path, allowed_ids: set[str], pattern: str = "*.md") -> tuple[dict[str, list[dict[str, str]]], list[Failure]]:
     directory = root / "recurrence"
     if not directory.exists():
         return {}, []
@@ -254,7 +254,7 @@ def load_recurrences(root: Path, allowed_ids: set[str]) -> tuple[dict[str, list[
     failures: list[Failure] = []
     expected_header = "| observed_at | source | scope | signal | summary |"
     expected_rule = "|---|---|---|---|---|"
-    for path in sorted(directory.glob("*.md")):
+    for path in sorted(directory.glob(pattern)):
         text, item_failures = strict_text(path)
         failures.extend(item_failures)
         if text is None:
@@ -408,8 +408,9 @@ def load_project_scope(project_directory: Path) -> list[Failure]:
         failures.append(failure("E_PROJECT_SCOPE_FIELDS", path, sorted(expected_fields), sorted(data), "只保留固定作用域字段。"))
     if data.get("project_key") != key or not PROJECT_KEY_RE.fullmatch(key):
         failures.append(failure("E_PROJECT_KEY", path, key, data.get("project_key"), "使用 slug + 12 位 identity hash。"))
-    if not isinstance(data.get("git_common_dir"), str) or not Path(data.get("git_common_dir", "")).is_absolute():
-        failures.append(failure("E_GIT_COMMON_DIR", path, "absolute normalized path", data.get("git_common_dir"), "记录 git rev-parse 得到的绝对 common dir。"))
+    git_common_dir = data.get("git_common_dir")
+    if git_common_dir is not None and (not isinstance(git_common_dir, str) or not Path(git_common_dir).is_absolute()):
+        failures.append(failure("E_GIT_COMMON_DIR", path, "absolute normalized path or null", git_common_dir, "Git 项目记录绝对 common dir；非 Git 工作区使用 null。"))
     roots = data.get("roots")
     if not isinstance(roots, list) or not roots or any(not isinstance(item, str) or not Path(item).is_absolute() for item in roots):
         failures.append(failure("E_PROJECT_ROOTS", path, "non-empty absolute path list", roots, "记录至少一个仓库根路径别名。"))
