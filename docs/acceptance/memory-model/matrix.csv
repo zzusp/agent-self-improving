@@ -1,13 +1,18 @@
-case_id,scenario,round-1,round-2,status
-MM-01,五类 memory schema 与物理 scope 校验,PASS,PASS,PASS
-MM-02,MEMORY tags 召回字段与 200 行/25KB 门禁,PASS,PASS,PASS
-MM-03,global 与 project bucket 完整 root 双射,PASS,PASS,PASS
-MM-04,git worktree 共享 repository identity,PASS,PASS,PASS
-MM-05,legacy experience 显式拒绝与 check 零写入,PASS,PASS,PASS
-MM-06,global/project experience 到 lesson 的正文和复现迁移,PASS,PASS,PASS
-MM-07,staging 或安装后校验失败时恢复旧状态,PASS,PASS,PASS
-MM-08,CLI render-index 与 check --root 行为,PASS,PASS,PASS
-MM-09,当前本机旧数据 scope 映射与迁移闭环,PASS,PASS,PASS
-MM-10,非 Git 工作区使用规范化根目录 identity,N/A,PASS,PASS
-MM-11,迁移预检忽略不属于 legacy 的 knowledge 复现,N/A,PASS,PASS
-MM-12,真实 59 条 experience 正文与关键字段逐条一致,N/A,PASS,PASS
+case_id,scenario,round-1,round-2,round-3,round-4,round-5,status
+MM-01,五类 memory schema 与非空 scope 校验,PASS,PASS,N/A,PASS,N/A,PASS
+MM-02,MEMORY tags 召回字段与 200 行门禁,PASS,PASS,N/A,PASS,N/A,PASS
+MM-03,global 与 project bucket 完整 root 双射,PASS,PASS,N/A,N/A,N/A,N/A
+MM-04,git worktree 共享 repository identity,PASS,PASS,N/A,N/A,N/A,N/A
+MM-05,legacy experience 显式拒绝与 check 零写入,PASS,PASS,N/A,PASS,PASS,PASS
+MM-06,experience 到统一 lesson 目录的正文和复现迁移,PASS,PASS,N/A,PASS,PASS,PASS
+MM-07,staging 或安装后校验失败时恢复旧状态,PASS,PASS,N/A,PASS,PASS,PASS
+MM-08,CLI render-index 与 check --root 行为,PASS,PASS,N/A,PASS,PASS,PASS
+MM-09,当前本机旧数据 scope 映射与迁移闭环,PASS,PASS,N/A,N/A,N/A,N/A
+MM-10,非 Git 工作区使用规范化根目录 identity,N/A,PASS,N/A,N/A,N/A,N/A
+MM-11,迁移预检忽略不属于 legacy 的 knowledge 复现,N/A,PASS,N/A,PASS,PASS,PASS
+MM-12,真实 59 条迁移内容逐条一致,N/A,PASS,N/A,PASS,PASS,PASS
+MM-13,本地数据根 README 升级为当前 knowledge/memory 契约,N/A,N/A,PASS,PASS,PASS,PASS
+MM-14,统一 memory current/archive 且拒绝旧项目桶,N/A,N/A,N/A,PASS,PASS,PASS
+MM-15,本机 59 条项目桶 memory 合并且 scope 去路由前缀,N/A,N/A,N/A,PASS,N/A,PASS
+MM-16,取消项目拆分后仅保留 200 行门禁并允许超过 25KB,N/A,N/A,N/A,PASS,N/A,PASS
+MM-17,从原始 legacy experience 重新迁移并原子替换本机 memory,N/A,N/A,N/A,N/A,PASS,PASS
