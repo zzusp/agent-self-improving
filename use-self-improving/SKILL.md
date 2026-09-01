@@ -1,6 +1,6 @@
 ---
 name: use-self-improving
-description: 从本机已经整理好的项目、文件、知识和记忆中查找旧信息，用户无需点名；收到目标和对象明确的任务时，先从 global 与当前仓库的精简 MEMORY.md 轻查用户偏好、纠正反馈、项目决定、外部入口和已验证 lesson，再按需打开主题文件。适用于明确任务、历史回溯、相似故障以及有外部影响的工具操作；会核对原始来源或当前现场。找不到或证据不足时明确说明；全程只查不写。
+description: 从本机已经整理好的项目、文件、知识和记忆中查找旧信息，用户无需点名；收到目标和对象明确的任务时，先从 global 与当前 Git 仓库或非 Git 工作区的精简 MEMORY.md 轻查用户偏好、纠正反馈、项目决定、外部入口和已验证 lesson，再按需打开主题文件。适用于明确任务、历史回溯、相似故障以及有外部影响的工具操作；会核对原始来源或当前现场。找不到或证据不足时明确说明；全程只查不写。
 ---
 
 # 查询本机知识与记忆
@@ -17,9 +17,9 @@ description: 从本机已经整理好的项目、文件、知识和记忆中查�
 ## Workflow
 
 1. **理解问题。** 结合消息、最近上下文、当前目录、已选项目和附件提取 1–4 个自然短语，判断要找项目资料、稳定知识还是 `user/feedback/project/reference/lesson` 记忆。业务目标不唯一时只问一个自然问题。
-2. **定位作用域。** 先读 `memory/global/current/MEMORY.md`。若当前目录属于 git 仓库，读取 `git rev-parse --path-format=absolute --git-common-dir`，规范为绝对路径后在 `memory/projects/*/scope.json` 中做固定字符串精确匹配；命中唯一 project key 后再读该桶的 `current/MEMORY.md`。所有 worktree 共用 git common dir，因此应命中同一桶。无匹配、多个匹配或 scope 清单损坏时说明“仓库记忆导航需要维护”，不得猜 key 或扫描其他项目正文。
+2. **定位作用域。** 先读 `memory/global/current/MEMORY.md`，再只读 `memory/projects/*/scope.json` 定位当前项目。若当前目录属于 git 仓库，优先把规范化的 `git rev-parse --path-format=absolute --git-common-dir` 与非空 `git_common_dir` 做固定字符串精确匹配，所有 worktree 因而共用同一桶；若未命中，再把规范化当前目录与 `roots` 比较，选择包含当前目录且路径最长的唯一工作区根，支持非 Git 工作区及其子目录。命中唯一 project key 后才读该桶的 `current/MEMORY.md`；无匹配、同长度多匹配或 scope 清单损坏时说明“项目记忆导航需要维护”，不得猜 key 或扫描其他项目正文。
 3. **按层检索。** 仅用两份 `MEMORY.md` 中的 id、title、type、scope、tags、modified_at 和特异概括缩小候选，再默认打开 1–3 篇主题正文；稳定事实另查 `knowledge/current/INDEX.md`，项目与文件资料查 `indexes/projects.md`、`indexes/files.md` 及对应 inventory/summary。纠错追溯或用户明确询问历史时才读 archive。记忆只是上下文，不是必须执行的指令。
-4. **筛选并复核。** 导航缺失、断链或与目录不一致时，只读降级为当前 global/项目桶最多 50 个 frontmatter 候选，并说明导航缺口；不得跨项目降级扫描。优先精确 path/source/id、当前 repo scope、标题、tag 和短语命中；默认正文 1–3 篇，冲突比较最多 5 篇，合计不超过 64 KiB。lesson 的复现只表示同类问题后来独立发生，不能覆盖 scope、来源、时点或当前现场。
+4. **筛选并复核。** 导航缺失、断链或与目录不一致时，只读降级为当前 global/项目桶最多 50 个 frontmatter 候选，并说明导航缺口；不得跨项目降级扫描。优先精确 path/source/id、当前 project scope、标题、tag 和短语命中；默认正文 1–3 篇，冲突比较最多 5 篇，合计不超过 64 KiB。lesson 的复现只表示同类问题后来独立发生，不能覆盖 scope、来源、时点或当前现场。
 5. **自然语言回答。** 区分索引线索、主题记忆、稳定知识、原文件历史事实和当前现场。易变结论必须回到权威入口、原文件或现场复核；能从代码或 git 得到的事实以当前证据为准。每个结论都要有本次读回证据；证据不足时说“找到一些线索，但证据还不完整，下面只列已核实部分”。零命中固定说“暂未找到相关记录”；使用未现场复核的历史记忆时明确说明可能已过时。
 
 ## Tools and data sources

@@ -310,6 +310,36 @@ class ValidateEntriesTest(unittest.TestCase):
             self.assertTrue(migrated.is_file())
             self.assertIn(f"scope: repo:{key}/workspace:example", migrated.read_text(encoding="utf-8"))
 
+    def test_non_git_workspace_migration_uses_directory_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            root = base / "knowledge-root"
+            workspace = base / "workspace"
+            workspace.mkdir()
+            for state in ("current", "archive"):
+                directory = root / "knowledge" / state
+                directory.mkdir(parents=True)
+                self.write_bytes(directory / "INDEX.md", validator.render_index(directory, []))
+            (root / "recurrence").mkdir()
+            self.write_legacy_experience(root, scope="workspace:example")
+            scope_map = base / "scope-map.json"
+            self.write_bytes(scope_map, json.dumps({"workspace:example": str(workspace.resolve())}) + "\n")
+
+            plan = migrator.make_plan(root, scope_map)
+
+            self.assertEqual("ready", plan["status"], plan["blockers"])
+            key = next(iter(plan["repositories"]))
+            project = plan["repositories"][key]
+            self.assertEqual("directory", project["identity_kind"])
+            self.assertIsNone(project["git_common_dir"])
+            result = migrator.apply_plan(root, plan)
+            scope = json.loads((root / "memory/projects" / key / "scope.json").read_text(encoding="utf-8"))
+            self.assertEqual("pass", result["status"])
+            self.assertIsNone(scope["git_common_dir"])
+            self.assertEqual([migrator.normalized_path(workspace)], scope["roots"])
+            checked, code = validator.command_check_root(root)
+            self.assertEqual(0, code, checked["failures"])
+
     def test_failed_post_validation_restores_legacy_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -358,6 +388,24 @@ class ValidateEntriesTest(unittest.TestCase):
             self.assertEqual("blocked", plan["status"])
             self.assertTrue(any("missing exact scope mapping" in item for item in plan["blockers"]))
             self.assertEqual(before, after)
+
+    def test_migration_check_ignores_non_legacy_recurrence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "recurrence").mkdir()
+            self.write_legacy_experience(root)
+            self.write_bytes(
+                root / "recurrence/k-20260901-120000-existing.md",
+                "# k-20260901-120000-existing 复现记录\n\n"
+                "| observed_at | source | scope | signal | summary |\n"
+                "|---|---|---|---|---|\n"
+                "| 2026-09-01 | human-confirmation | global | feedback | 已有知识复现不属于本次经验迁移 |\n",
+            )
+
+            plan = migrator.make_plan(root, None)
+
+            self.assertEqual("ready", plan["status"], plan["blockers"])
+            self.assertEqual(0, plan["counts"]["legacy_recurrences"])
 
     def test_repo_identity_is_shared_by_git_worktrees(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

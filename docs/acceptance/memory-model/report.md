@@ -2,18 +2,19 @@
 
 ## 结论
 
-源码与 fixture 验收全绿：memory 已成为 experience 的超集，保留 `lesson` 学习；global 与 repository memory 物理隔离；同仓库 worktree 解析到相同 identity；索引含 tags 并执行 200 行/25KB 双门禁；legacy 迁移支持零副作用检查、显式 scope map、正文/复现保留、备份和失败回滚。
+源码、fixture 与当前本机真实迁移验收全绿：memory 已成为 experience 的超集，保留 `lesson` 学习；global 与项目 memory 物理隔离；同仓库 worktree 共享 Git identity，非 Git 工作区使用规范化根目录 identity；索引含 tags 并执行 200 行/25KB 双门禁；legacy 迁移已完成零副作用检查、显式 scope map、正文/复现保留、备份和安装后全根校验。
 
 ## 证据
 
-- 13 个 unittest 全部通过。
+- 15 个 unittest 全部通过。
 - 3 个 Python 文件 AST 解析通过。
-- staged diff whitespace 检查通过。
-- 当前真实数据 `--check` 扫描 59 条 experience，汇总 22 个唯一 scope blocker，根目录清单未变化。
+- 当前真实数据 `--check` 扫描并计划 59 条 experience，形成 3 个项目桶、识别 1 个旧复现，0 blocker；预检前后根目录清单未变化。
+- `--apply` 成功后独立 root 校验得到 88 个条目、0 failure；59 条迁移正文和关键字段逐条比较 0 mismatch，1 个旧复现转换一致且既有 knowledge 复现保留。
+- 三个项目 `MEMORY.md` 均低于 200 行/25KB；旧 `experience/` 已移动到带 UTC 时间戳的 legacy 备份，staging 残留为 0。
 
-## 未执行项
+## 边界
 
-- 未对当前本机真实数据执行 `--apply`；缺少 22 个 scope 的仓库路径确认。
 - 未发布新 Skill 版本，也未验证 skills.sh、SkillHub 或 ClawHub 安装后的运行态。
+- 本地数据根既有 `README.md` 仍是旧契约文本；迁移器未在缺少模板版本标识时覆盖用户文档，仓库 README 与 Skill 契约已更新。
 
-因此本报告只证明源码、CLI fixture 和真实数据只读预检，不声称已完成用户数据迁移或发布部署。
+因此本报告证明当前本机数据迁移闭环与源码行为，不声称已完成 Skill 市场发布或其他运行环境部署。

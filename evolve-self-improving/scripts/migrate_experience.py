@@ -49,14 +49,29 @@ def git_value(repository: Path, *args: str) -> str:
 
 
 def resolve_repository(repository: Path) -> dict[str, Any]:
-    root = Path(git_value(repository, "rev-parse", "--path-format=absolute", "--show-toplevel"))
-    common = Path(git_value(repository, "rev-parse", "--path-format=absolute", "--git-common-dir"))
-    identity = normalized_path(common)
+    if not repository.is_dir():
+        raise ValueError("mapped project path is not an existing directory")
+    if is_linklike(repository):
+        raise ValueError("mapped project path must not be a link or junction")
+    try:
+        root = Path(git_value(repository, "rev-parse", "--path-format=absolute", "--show-toplevel"))
+        common = Path(git_value(repository, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+    except ValueError:
+        root = repository.resolve()
+        common = None
+        identity = "directory:" + normalized_path(root)
+        repository_name = root.name
+        identity_kind = "directory"
+    else:
+        identity = normalized_path(common)
+        repository_name = common.parent.name if common.name.casefold() == ".git" else common.stem
+        identity_kind = "git"
     digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:12]
-    repository_name = common.parent.name if common.name.casefold() == ".git" else common.stem
     return {
         "project_key": f"{slug(repository_name)}-{digest}",
-        "git_common_dir": normalized_path(common),
+        "identity_kind": identity_kind,
+        "identity": identity,
+        "git_common_dir": normalized_path(common) if common is not None else None,
         "root": normalized_path(root),
     }
 
@@ -156,7 +171,7 @@ def make_plan(root: Path, scope_map_path: Path | None) -> dict[str, Any]:
                     continue
                 key = str(repository["project_key"])
                 existing = repositories.get(key)
-                if existing and existing["git_common_dir"] != repository["git_common_dir"]:
+                if existing and existing["identity"] != repository["identity"]:
                     blockers.append(f"project key collision: {key}")
                     continue
                 if existing:
@@ -192,7 +207,7 @@ def make_plan(root: Path, scope_map_path: Path | None) -> dict[str, Any]:
     if duplicate_new_ids:
         blockers.append("duplicate migrated ids: " + ", ".join(duplicate_new_ids))
     if not blockers:
-        legacy_records, recurrence_failures = validator.load_recurrences(root, legacy_ids)
+        legacy_records, recurrence_failures = validator.load_recurrences(root, legacy_ids, "e-*.md")
         blockers.extend(f"legacy recurrence invalid: {item.code} {item.path}" for item in recurrence_failures)
         migrated_records = {
             "m-" + entry_id[2:]: records
