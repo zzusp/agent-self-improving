@@ -21,8 +21,8 @@ description: 在当前对话中自动发现值得跨会话保留的 user、feedb
 1. **准备数据根。** 数据根使用 `~/.agent-knowledge/`。确保 `knowledge/{current,archive}`、`memory/{current,archive}`、导航文件和 `maintenance.md` 存在；数据根已存在但缺新目录时补缺项，不覆盖已有内容。若发现 legacy `experience/`，先运行 `scripts/migrate_experience.py --root <根> --check`；check 零副作用，存在 blocker 或未获明确迁移授权时不执行 `--apply`，也不绕过旧数据继续写。
 2. **写入统一 memory。** 所有 current 记忆写入 `memory/current/`，归档写入 `memory/archive/`。每条记忆必须有稳定的逻辑 scope：明确跨任务适用时使用 `global`，否则优先复用索引中已有的 `workspace:*`、`domain:*`、`product:*`、`runtime:*` 或其他已证实标签，必要时用 `/` 表示其子范围。scope 只用于检索过滤，不依据它建目录，也不识别项目、Git、worktree、路径或临时工作区。
 3. **判断是否值得记。** 条目必须同时满足：有原文件、命令回读、运行现场或明确确认支持；跨会话仍会影响判断或行动；无法直接从代码、git 或固定项目指令恢复；scope 与失败边界清楚；已脱敏。易变现值只记权威入口、核验方法和已知时点。条件不全时说明未沉淀原因，不为每次会话硬造记忆。
-4. **去重、冲突和纠正。** 先读唯一的 `memory/current/MEMORY.md`、再读 `knowledge/current/INDEX.md`，用 title、type、scope、tags 和特异概括缩小候选；命中后才打开正文，纠错追溯才读 archive。等价记忆不新增，只追加独立 source、修正文与 `modified_at`。明确证伪时先写带 `supersedes` 的新条目并读回，再归档旧条目。knowledge 与 lesson 可在 `recurrence/<entry-id>.md` 记录后来独立发生的复现；其他记忆不统计复现次数。
-5. **原子写入并读回。** knowledge 使用 `k-` id，必填 `id/title/scope/tags/learned_at/source`，正文有效字符 300–400。memory 使用 `m-` id，另有必填 `type/modified_at`，正文有效字符 40–800；`modified_at` 使用 UTC `YYYY-MM-DDTHH:MM:SSZ`：
+4. **去重、冲突和纠正。** 先读唯一的 `memory/current/MEMORY.md`、再读 `knowledge/current/INDEX.md`，用 title、scope 和 summary 缩小候选；命中后才打开正文，纠错追溯才读 archive。等价记忆不新增，只追加独立 source、修正文与 `modified_at`。明确证伪时先写带 `supersedes` 的新条目并读回，再归档旧条目。knowledge 与 lesson 可在 `recurrence/<entry-id>.md` 记录后来独立发生的复现；其他记忆不统计复现次数。
+5. **原子写入并读回。** knowledge 使用 `k-` id，必填 `id/title/scope/tags/learned_at/source`，正文有效字符 300–400。memory 使用 `m-` id，另有必填 `type/modified_at/summary`，正文有效字符 40–800；`modified_at` 使用 UTC `YYYY-MM-DDTHH:MM:SSZ`。`summary` 由 Agent 根据完整记忆概括“什么情况下应打开这条记忆”，必须是 20–120 字的完整单行语义摘要，不能从正文机械抽取或截断：
 
    ```markdown
    ---
@@ -34,17 +34,18 @@ description: 在当前对话中自动发现值得跨会话保留的 user、feedb
    source: conversation:<opaque-ref>
    type: lesson
    modified_at: YYYY-MM-DDTHH:MM:SSZ
+   summary: 排查 OAuth 回调未完成时使用，先核对监听器生命周期与真实回调入口。
    ---
    正文写清记忆内容、使用场景、不适用边界和必要的复核方式。
    ```
 
-   写入同目录临时文件，运行 `scripts/validate_entries.py check --file <条目>` 后原子替换。再用 `render-index --directory <current或archive目录>` 生成完整导航临时文本：current memory 写 `MEMORY.md`，archive 与 knowledge 写 `INDEX.md`。`MEMORY.md` 不得超过 200 行，超限时合并或归档低价值内容，不截断、不丢条目。最后运行 `check --root ~/.agent-knowledge/` 并逐项读回；失败则恢复本项写前状态，不把部分成功说成完成。
+   写入同目录临时文件，运行 `scripts/validate_entries.py check --file <条目>` 后原子替换。再用 `render-index --directory <current或archive目录>` 生成完整导航临时文本：current memory 写 `MEMORY.md`，每条只输出 `[title](主题文件) | scope | summary`；archive 与 knowledge 写 `INDEX.md`。`MEMORY.md` 不得超过 200 行或 25000 bytes，超限时改写过长摘要、合并或归档低价值内容，不截断、不丢条目。最后运行 `check --root ~/.agent-knowledge/` 并逐项读回；失败则恢复本项写前状态，不把部分成功说成完成。
 6. **自然维护并报告。** 每次调用读取 `maintenance.md`；距 `last_reviewed_at` 满 7 天才检查 current 的来源、重复、冲突、过时风险、可从代码推导的冗余和敏感泄漏。删除只在用户明确指定条目或范围时执行，先验证目标在拥有目录内且不是链接。报告实际新增、修正、归档、迁移或未保存内容及原因。
 
 ## Tools and data sources
 
 - 只读原文件、代码、git 历史、配置、命令回读和运行现场；正常写入仅限 `knowledge/`、`memory/`、knowledge/lesson 使用的 `recurrence/`、根最小 README 与 `maintenance.md`。
-- 校验器只读；迁移工具是唯一可移动 legacy `experience/` 的脚本，必须先 `--check`，`--apply` 成功后把原目录与旧复现文件保存在 `legacy/experience-<UTC时间>/`，可回查恢复。
+- 校验器只读；legacy `experience` 必须先由 Agent 逐条补齐语义 `summary`，迁移工具不负责生成摘要。迁移工具是唯一可移动旧目录的脚本，必须先 `--check`，`--apply` 成功后把原目录与旧复现文件保存在 `legacy/experience-<UTC时间>/`，可回查恢复。
 - `source` 可为非空列表；新确认只能追加。记忆是上下文而非强制规则；需要强制执行的行为应进入项目指令、Skill、hook 或权限配置。
 
 ## Gotchas

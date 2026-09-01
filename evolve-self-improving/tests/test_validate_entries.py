@@ -51,6 +51,7 @@ class ValidateEntriesTest(unittest.TestCase):
         scope: str,
         entry_id: str = "m-20260901-120000-testing",
         tags: str = "testing, workflow",
+        summary: str = "处理测试流程判断时使用，先读取当前实现并确认这条记忆仍适用于当前现场。",
         body: str | None = None,
     ) -> Path:
         path = directory / f"{entry_id}.md"
@@ -65,6 +66,7 @@ class ValidateEntriesTest(unittest.TestCase):
             "source: human-confirmation\n"
             f"type: {memory_type}\n"
             "modified_at: 2026-09-01T12:00:00Z\n"
+            f"summary: {summary}\n"
             "---\n"
             + (body or "用户明确确认测试前应先读取当前实现；这条记忆会影响后续会话的判断顺序，但不是强制执行规则。")
             + "\n",
@@ -98,6 +100,7 @@ class ValidateEntriesTest(unittest.TestCase):
             "tags: [diagnosis, error]\n"
             "learned_at: 2026-09-01\n"
             "source: human-confirmation\n"
+            "summary: 诊断已由运行证据收敛且同类任务可能再次出现时，用它复核触发条件、根因和失败边界。\n"
             "---\n"
             + body
             + "\n",
@@ -118,20 +121,72 @@ class ValidateEntriesTest(unittest.TestCase):
                 _, failures = validator.load_entry(path)
                 self.assertEqual([], failures, memory_type)
 
-    def test_memory_index_contains_tags_for_recall(self) -> None:
+    def test_memory_index_uses_authored_summary_and_minimal_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             self.initialize_root(root)
+            summary = "排查 OAuth 回调没有完成时使用，先核对监听器生命周期与真实回调入口。"
             path = self.write_memory(
                 root / "memory/current",
                 memory_type="lesson",
                 scope="workspace:example",
                 tags="oauth, callback-listener",
+                summary=summary,
+                body="正文首句与索引摘要故意不同，用于证明渲染器不会从正文抽取或截断。后续正文继续保存证据和边界。",
             )
             entry, failures = validator.load_entry(path)
             self.assertEqual([], failures)
             rendered = validator.render_index(root / "memory/current", [entry])
-            self.assertIn("tags:oauth, callback-listener", rendered)
+            self.assertIn(
+                f"- [测试记忆](./{path.name}) | workspace:example | {summary}",
+                rendered,
+            )
+            self.assertNotIn("tags:", rendered)
+            self.assertNotIn("2026-09-01T12:00:00Z", rendered)
+            self.assertNotIn("| lesson |", rendered)
+            self.assertNotIn("正文首句", rendered)
+
+    def test_memory_rejects_missing_or_invalid_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.initialize_root(root)
+            short = self.write_memory(
+                root / "memory/current",
+                memory_type="feedback",
+                scope="global",
+                summary="过短",
+            )
+            _, failures = validator.load_entry(short)
+            self.assertIn("E_MEMORY_SUMMARY_LENGTH", {item.code for item in failures})
+
+            overlong = self.write_memory(
+                root / "memory/current",
+                memory_type="feedback",
+                scope="global",
+                summary="长" * 121,
+            )
+            _, failures = validator.load_entry(overlong)
+            self.assertIn("E_MEMORY_SUMMARY_LENGTH", {item.code for item in failures})
+
+            multiline = overlong.with_name("m-20260901-120002-multiline.md")
+            text = overlong.read_text(encoding="utf-8").replace(
+                "id: m-20260901-120000-testing",
+                "id: m-20260901-120002-multiline",
+            )
+            text = text.replace("summary: " + ("长" * 121), "summary:\n  - 第一行不是单行摘要\n  - 第二行也不是")
+            self.write_bytes(multiline, text)
+            _, failures = validator.load_entry(multiline)
+            self.assertIn("E_MEMORY_SUMMARY", {item.code for item in failures})
+
+            missing = overlong.with_name("m-20260901-120001-missing.md")
+            text = overlong.read_text(encoding="utf-8").replace(
+                "id: m-20260901-120000-testing",
+                "id: m-20260901-120001-missing",
+            )
+            text = "\n".join(line for line in text.splitlines() if not line.startswith("summary:")) + "\n"
+            self.write_bytes(missing, text)
+            _, failures = validator.load_entry(missing)
+            self.assertIn("E_FIELDS", {item.code for item in failures})
 
     def test_memory_rejects_unknown_type_and_empty_scope(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -199,7 +254,7 @@ class ValidateEntriesTest(unittest.TestCase):
             self.assertEqual(expected, rendered.stdout)
             self.assertEqual("pass", json.loads(checked.stdout)["status"])
 
-    def test_memory_index_enforces_line_limit_only(self) -> None:
+    def test_memory_index_enforces_line_limit(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp) / "memory/current"
             directory.mkdir(parents=True)
@@ -218,7 +273,29 @@ class ValidateEntriesTest(unittest.TestCase):
             rendered = validator.render_index(directory, entries)
             codes = {item.code for item in validator.index_limit_failures(directory / "MEMORY.md", rendered)}
             self.assertIn("E_MEMORY_INDEX_LINES", codes)
-            self.assertNotIn("E_MEMORY_INDEX_BYTES", codes)
+
+    def test_memory_index_enforces_byte_limit_without_truncating_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp) / "memory/current"
+            directory.mkdir(parents=True)
+            entries = []
+            summary = "处理需要完整召回条件的任务时使用，" + ("长" * 80)
+            for index in range(80):
+                path = self.write_memory(
+                    directory,
+                    memory_type="lesson",
+                    scope="global",
+                    entry_id=f"m-20260901-13{index:04d}-entry",
+                    summary=summary,
+                )
+                entry, failures = validator.load_entry(path)
+                self.assertEqual([], failures)
+                entries.append(entry)
+            rendered = validator.render_index(directory, entries)
+            codes = {item.code for item in validator.index_limit_failures(directory / "MEMORY.md", rendered)}
+            self.assertLess(len(rendered.splitlines()), validator.INDEX_MAX_LINES)
+            self.assertIn("E_MEMORY_INDEX_BYTES", codes)
+            self.assertEqual(80, rendered.count(summary))
 
     def test_root_rejects_unmigrated_experience(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -268,6 +345,7 @@ class ValidateEntriesTest(unittest.TestCase):
             migrated = root / "memory/current/m-20260901-120000-testing.md"
             self.assertTrue(migrated.is_file())
             self.assertIn("type: lesson", migrated.read_text(encoding="utf-8"))
+            self.assertIn("summary: 诊断已由运行证据收敛", migrated.read_text(encoding="utf-8"))
             self.assertTrue((root / "recurrence/m-20260901-120000-testing.md").is_file())
             self.assertTrue(Path(result["backup"]).is_dir())
             checked, code = validator.command_check_root(root)
@@ -358,6 +436,29 @@ class ValidateEntriesTest(unittest.TestCase):
 
             self.assertEqual("ready", plan["status"], plan["blockers"])
             self.assertEqual(0, plan["counts"]["legacy_recurrences"])
+
+    def test_migration_requires_agent_authored_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "recurrence").mkdir()
+            legacy = self.write_legacy_experience(root)
+            text = legacy.read_text(encoding="utf-8")
+            text = "\n".join(line for line in text.splitlines() if not line.startswith("summary:")) + "\n"
+            self.write_bytes(legacy, text)
+
+            plan = migrator.make_plan(root)
+
+            self.assertEqual("blocked", plan["status"])
+            self.assertTrue(any("E_LEGACY_FIELDS" in item for item in plan["blockers"]))
+
+            text = legacy.read_text(encoding="utf-8").replace(
+                "source: human-confirmation\n",
+                "source: human-confirmation\nsummary: 过短\n",
+            )
+            self.write_bytes(legacy, text)
+            plan = migrator.make_plan(root)
+            self.assertEqual("blocked", plan["status"])
+            self.assertTrue(any("E_LEGACY_SUMMARY" in item for item in plan["blockers"]))
 
 if __name__ == "__main__":
     unittest.main()

@@ -98,7 +98,7 @@ ClawHub 上的发布副本遵循平台规定的 MIT-0 许可；GitHub 仓库继�
 
 1. `distill-self-improving` 整理用户明确指定的原始资料，但不自动生成知识或记忆条目。
 2. `evolve-self-improving` 只保存跨会话有用、来源可回查、边界清楚且无法从代码或固定指令直接推导的记忆；稳定事实进入 knowledge，已收敛方法、失败模式和护栏进入 `lesson`。
-3. `use-self-improving` 先读统一的一行式 `MEMORY.md`，命中后才读取 1–3 个主题文件；易变结论回到原文件、git 或当前现场复核。
+3. `use-self-improving` 先读统一的一行式 `MEMORY.md`，按标题、scope 和 Agent 编写的召回摘要命中后才读取 1–3 个主题文件；易变结论回到原文件、git 或当前现场复核。
 
 ## 数据与安全边界
 
@@ -108,12 +108,12 @@ ClawHub 上的发布副本遵循平台规定的 MIT-0 许可；GitHub 仓库继�
 - memory 分为 `user`、`feedback`、`project`、`reference`、`lesson`；它是可审计的上下文，不是强制规则，也不会自动下沉为 Skill、项目规则或执行门禁。
 - 所有记忆统一进入 `memory/current/` 或 `memory/archive/`；`scope` 保留 workspace、domain、product、runtime 等逻辑隔离，检索时只采用 `global`、当前 scope 或其父级，但不创建项目桶，也不判断 Git、目录或临时工作区。
 - knowledge 与 lesson 可记录后来独立发生的复现证据；其他 memory 不统计复现次数，等价信息只追加来源并更新 `modified_at`。
-- 可从当前代码、git 历史或固定项目指令直接推导的信息不写入 memory；`MEMORY.md` 不超过 200 行，主题正文按需读取。
+- 可从当前代码、git 历史或固定项目指令直接推导的信息不写入 memory；`MEMORY.md` 不超过 200 行和 25000 bytes，主题正文按需读取。
 - 凭据、隐私、客户原文和长篇原文不应写入知识库。
 
 ## 从 experience 迁移
 
-本版本将旧 `experience/{current,archive}` 迁移为 memory 中的 `lesson`，保留正文、scope、来源、日期、复现证据和归档状态。所有条目进入统一 memory，不需要项目目录映射。
+本版本将旧 `experience/{current,archive}` 迁移为 memory 中的 `lesson`，保留正文、scope、来源、日期、复现证据和归档状态。所有条目进入统一 memory，不需要项目目录映射。迁移前必须由 Agent 逐条补齐 20–120 字的语义 `summary`；迁移器只保留摘要，不从正文生成。
 
 先执行零副作用检查：
 
