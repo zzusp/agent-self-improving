@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | `distill-self-improving` | 将用户明确指定的文件、目录或项目建立索引并逐份蒸馏 | “把这个项目加入知识库”“整理这批文档” |
 | `evolve-self-improving` | 自动维护 user、feedback、project、reference、lesson 五类跨会话记忆与稳定知识 | “记住这条规则”“把已确认根因沉淀下来” |
-| `use-self-improving` | 从统一的精简 `MEMORY.md` 召回相关记忆，再按需读取主题文件 | “处理这个任务”“之前为什么这么做？” |
+| `use-self-improving` | 有具体历史线索可能改变当前判断时，从精简 `MEMORY.md` 按需召回并复核 | “之前为什么这么做？”“沿用上次确认的规则” |
 
 ## 安装
 
